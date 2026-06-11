@@ -52,7 +52,19 @@ def extract_merged_prs(repo: str, author: str, limit: int = 100) -> list[Evidenc
     """Merged PRs authored by `author` in `owner/repo`, as Evidence. Hits the
     network via `gh`; the parsing is delegated to the pure `parse_pr_evidence`."""
     out = _run_gh(
-        ["pr", "list", "--repo", repo, "--author", author, "--state", "merged",
-         "--limit", str(limit), "--json", _PR_FIELDS]
+        [
+            "pr",
+            "list",
+            "--repo",
+            repo,
+            "--author",
+            author,
+            "--state",
+            "merged",
+            "--limit",
+            str(limit),
+            "--json",
+            _PR_FIELDS,
+        ]
     )
     return parse_pr_evidence(out)

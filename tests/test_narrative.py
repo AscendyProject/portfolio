@@ -35,7 +35,7 @@ def test_parse_plain_json_array():
 
 
 def test_parse_tolerates_code_fences_and_prose():
-    txt = "Here you go:\n```json\n[{\"text\": \"Y\", \"evidence_refs\": [\"app/auth.py\"]}]\n```\nThanks!"
+    txt = 'Here you go:\n```json\n[{"text": "Y", "evidence_refs": ["app/auth.py"]}]\n```\nThanks!'
     claims = parse_claims(txt)
     assert len(claims) == 1 and claims[0].evidence_refs == ["app/auth.py"]
 
@@ -60,7 +60,9 @@ def test_hallucinated_ref_never_reaches_portfolio():
 
 
 def test_grounded_claim_reaches_portfolio():
-    good = json.dumps([{"text": "Implemented token rotation", "evidence_refs": ["PR#128", "app/auth.py"], "confidence": 0.9}])
+    good = json.dumps(
+        [{"text": "Implemented token rotation", "evidence_refs": ["PR#128", "app/auth.py"], "confidence": 0.9}]
+    )
     res = build_from_evidence("dev", _EVIDENCE, runner=lambda _p: good)
     assert len(res.portfolio.claims) == 1
     assert res.portfolio.claims[0].grounded is True
