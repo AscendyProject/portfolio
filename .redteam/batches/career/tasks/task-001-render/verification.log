@@ -1,0 +1,23 @@
+$ bash .redteam/scripts/verify.sh
+=== ruff check ===
+All checks passed!
+=== ruff format check ===
+11 files already formatted
+=== pytest ===
+============================= test session starts ==============================
+platform darwin -- Python 3.12.8, pytest-8.2.2, pluggy-1.6.0
+rootdir: /Users/kh/Documents/ascendy-portfolio
+configfile: pyproject.toml
+plugins: langsmith-0.4.29, cov-7.1.0, anyio-4.10.0
+collected 36 items
+
+tests/test_extract.py ....                                               [ 11%]
+tests/test_grounding.py .....                                            [ 25%]
+tests/test_narrative.py .......                                          [ 44%]
+tests/test_render.py ....................                                [100%]
+
+============================== 36 passed in 0.05s ==============================
+✅ verify.sh OK
+
+[exit 0]
+

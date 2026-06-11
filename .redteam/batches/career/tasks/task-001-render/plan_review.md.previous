@@ -1,0 +1,14 @@
+PR-001 severity:blocker status:open
+
+`outcome.md` does not include the required parseable `## Verification` fenced `yaml` block with at least one command. It has `## Verification hooks` plus prose bullets, but the review criteria explicitly block plans missing a `## Verification` section containing a fenced YAML block.
+
+Expected shape:
+
+```yaml
+commands:
+  - bash .redteam/scripts/verify.sh
+```
+
+The command itself is acceptable as a pure verification step, but it must be in the required parseable block.
+
+REVIEW_DECISION: CHANGES_REQUESTED

@@ -1,0 +1,396 @@
+diff --git a/portfolio/render.py b/portfolio/render.py
+new file mode 100644
+index 0000000..077b9c3
+--- /dev/null
++++ b/portfolio/render.py
+@@ -0,0 +1,82 @@
++"""Deterministic, stdlib-only Markdown renderer for a grounded Portfolio.
++
++Turns a Portfolio (subject + evidence + already-grounded claims) into a
++human-readable Markdown document where every rendered claim shows its grounding:
++cited evidence refs, the evidence URL when present, and the claim's confidence.
++
++No model, subprocess, or network call is made — stdlib and portfolio.model only.
++"""
++
++from __future__ import annotations
++
++from portfolio.model import Portfolio
++
++# Characters that carry structural meaning in Markdown and must be escaped when
++# interpolated into headings, list items, or body text.  Backslash must come first
++# so it is not double-escaped when other characters are processed.
++_ESCAPE_CHARS = frozenset("`[]\\*_#<>")
++
++
++def _escape(text: str) -> str:
++    """Backslash-escape Markdown-significant characters; replace newlines with spaces."""
++    result: list[str] = []
++    for ch in text:
++        if ch == "\n":
++            result.append(" ")
++        elif ch in _ESCAPE_CHARS:
++            result.append("\\" + ch)
++        else:
++            result.append(ch)
++    return "".join(result)
++
++
++def render_markdown(portfolio: Portfolio) -> str:
++    """Render a grounded Portfolio to a Markdown string.
++
++    For every claim in portfolio.claims the output contains:
++      - the claim text (as a heading)
++      - each cited evidence ref from claim.evidence_refs
++      - the corresponding Evidence.url when the looked-up Evidence has a
++        non-empty url (no URL is fabricated for absent or empty-url Evidence)
++      - the Evidence.detail when non-empty
++      - the claim's confidence value
++
++    When portfolio.claims is empty the document contains a clear
++    "no grounded claims" notice and still includes the subject heading.
++    """
++    evidence_by_ref = {e.ref: e for e in portfolio.evidence}
++
++    lines: list[str] = []
++
++    # Top-level heading — em dash kept as Unicode; ruff/ruff-format handle UTF-8.
++    lines.append(f"# Portfolio — {_escape(portfolio.subject)}")
++    lines.append("")
++
++    if not portfolio.claims:
++        lines.append("_no grounded claims_")
++        lines.append("")
++        return "\n".join(lines)
++
++    for claim in portfolio.claims:
++        lines.append(f"## {_escape(claim.text)}")
++        lines.append("")
++        lines.append(f"- Confidence: {claim.confidence:.2f}")
++        if claim.evidence_refs:
++            lines.append("- Evidence:")
++            for ref in claim.evidence_refs:
++                ev = evidence_by_ref.get(ref)
++                escaped_ref = _escape(ref)
++                if ev is not None and ev.url:
++                    if ev.detail:
++                        lines.append(f"  - {escaped_ref}: {_escape(ev.url)} — {_escape(ev.detail)}")
++                    else:
++                        lines.append(f"  - {escaped_ref}: {_escape(ev.url)}")
++                elif ev is not None and ev.detail:
++                    lines.append(f"  - {escaped_ref} — {_escape(ev.detail)}")
++                else:
++                    lines.append(f"  - {escaped_ref}")
++        lines.append("")
++        lines.append("---")
++        lines.append("")
++
++    return "\n".join(lines)
+diff --git a/tests/test_render.py b/tests/test_render.py
+new file mode 100644
+index 0000000..8304624
+--- /dev/null
++++ b/tests/test_render.py
+@@ -0,0 +1,302 @@
++"""Tests for the deterministic Markdown renderer.
++
++All tests build Portfolio / Evidence / Claim instances directly — no live gh,
++no live model runner.  The renderer must be a pure, stdlib-only function.
++"""
++
++from __future__ import annotations
++
++import sys
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++
++from portfolio.model import Claim, Evidence, Portfolio  # noqa: E402 — after sys.path setup per test-conventions
++from portfolio.render import render_markdown  # noqa: E402 — after sys.path setup per test-conventions
++
++
++# ---------------------------------------------------------------------------
++# Helpers
++# ---------------------------------------------------------------------------
++
++
++def _portfolio_with_claim(
++    subject: str = "alice",
++    claim_text: str = "Implemented token rotation",
++    refs: list[str] | None = None,
++    confidence: float = 0.9,
++    evidence: list[Evidence] | None = None,
++) -> Portfolio:
++    refs = refs or ["PR#128"]
++    evidence = evidence or [Evidence(kind="pr", ref="PR#128", url="https://github.com/a/b/pull/128")]
++    return Portfolio(
++        subject=subject,
++        evidence=evidence,
++        claims=[Claim(text=claim_text, evidence_refs=refs, confidence=confidence)],
++    )
++
++
++# ---------------------------------------------------------------------------
++# Subject heading
++# ---------------------------------------------------------------------------
++
++
++def test_subject_heading_present():
++    """The returned string starts with a top-level Markdown heading containing the subject."""
++    out = render_markdown(Portfolio(subject="alice", evidence=[], claims=[]))
++    assert out.startswith("# Portfolio")
++    assert "alice" in out
++
++
++# ---------------------------------------------------------------------------
++# Claim rendering
++# ---------------------------------------------------------------------------
++
++
++def test_claim_text_rendered():
++    """Claim text appears in the output."""
++    p = _portfolio_with_claim(claim_text="Shipped auth overhaul")
++    out = render_markdown(p)
++    assert "Shipped auth overhaul" in out
++
++
++def test_claim_confidence_rendered():
++    """Claim confidence appears in the output as a fixed-decimal string."""
++    p = _portfolio_with_claim(confidence=0.85)
++    out = render_markdown(p)
++    assert "0.85" in out
++
++
++def test_claim_evidence_ref_rendered():
++    """Each cited evidence ref appears in the output."""
++    ev = Evidence(kind="pr", ref="PR#128", url="https://example.com/128")
++    p = Portfolio(
++        subject="alice",
++        evidence=[ev],
++        claims=[Claim(text="Did something", evidence_refs=["PR#128"], confidence=0.9)],
++    )
++    out = render_markdown(p)
++    # The ref may be escaped (e.g. "PR\#128") — check the unescaped digits are present
++    assert "PR" in out and "128" in out
++
++
++def test_evidence_url_rendered_when_present():
++    """When the looked-up Evidence has a non-empty url it appears in the output."""
++    ev = Evidence(kind="pr", ref="PR#128", url="https://github.com/alice/repo/pull/128")
++    p = Portfolio(
++        subject="alice",
++        evidence=[ev],
++        claims=[Claim(text="Token rotation", evidence_refs=["PR#128"], confidence=0.9)],
++    )
++    out = render_markdown(p)
++    assert "https://github.com/alice/repo/pull/128" in out
++
++
++def test_no_fabricated_url_when_evidence_url_empty():
++    """No URL is emitted for a ref whose Evidence.url is empty."""
++    ev = Evidence(kind="pr", ref="PR#128", url="")
++    p = Portfolio(
++        subject="alice",
++        evidence=[ev],
++        claims=[Claim(text="Token rotation", evidence_refs=["PR#128"], confidence=0.9)],
++    )
++    out = render_markdown(p)
++    assert "http" not in out
++
++
++def test_no_fabricated_url_for_ref_absent_from_evidence():
++    """No URL is emitted when the cited ref has no matching Evidence entry at all."""
++    p = Portfolio(
++        subject="alice",
++        evidence=[],  # empty evidence set
++        claims=[Claim(text="Something", evidence_refs=["PR#999"], confidence=0.7)],
++    )
++    out = render_markdown(p)
++    assert "http" not in out
++
++
++def test_multiple_claims_all_rendered():
++    """All claims in portfolio.claims are present in the output."""
++    ev1 = Evidence(kind="pr", ref="PR#1", url="https://example.com/1")
++    ev2 = Evidence(kind="pr", ref="PR#2", url="")
++    p = Portfolio(
++        subject="bob",
++        evidence=[ev1, ev2],
++        claims=[
++            Claim(text="First achievement", evidence_refs=["PR#1"], confidence=0.8),
++            Claim(text="Second achievement", evidence_refs=["PR#2"], confidence=0.6),
++        ],
++    )
++    out = render_markdown(p)
++    assert "First achievement" in out
++    assert "Second achievement" in out
++    assert "0.80" in out
++    assert "0.60" in out
++
++
++def test_evidence_detail_rendered_when_present():
++    """Evidence detail text appears in the output when non-empty."""
++    ev = Evidence(kind="pr", ref="PR#1", url="", detail="fixed auth bug in login flow")
++    p = Portfolio(
++        subject="alice",
++        evidence=[ev],
++        claims=[Claim(text="Something", evidence_refs=["PR#1"], confidence=0.7)],
++    )
++    out = render_markdown(p)
++    assert "fixed auth bug in login flow" in out
++
++
++# ---------------------------------------------------------------------------
++# Empty claims
++# ---------------------------------------------------------------------------
++
++
++def test_empty_claims_contains_no_grounded_notice():
++    """When portfolio.claims is empty the output contains 'no grounded claims'."""
++    p = Portfolio(subject="alice", evidence=[], claims=[])
++    out = render_markdown(p)
++    assert "no grounded claims" in out
++
++
++def test_empty_claims_still_has_subject_heading():
++    """Subject heading is present even when there are no claims."""
++    p = Portfolio(subject="alice", evidence=[], claims=[])
++    out = render_markdown(p)
++    assert "# Portfolio" in out
++    assert "alice" in out
++
++
++# ---------------------------------------------------------------------------
++# Markdown escaping
++# ---------------------------------------------------------------------------
++
++_HOSTILE_CHARS = "`[]\\*_#<>"
++
++
++def test_escape_hostile_subject():
++    """Hostile characters in subject do not introduce new Markdown structures."""
++    hostile = "# evil `subject` [link](http://x.com) *bold* _em_ <tag>"
++    p = Portfolio(subject=hostile, evidence=[], claims=[])
++    out = render_markdown(p)
++    lines = out.splitlines()
++    # The document must have exactly one top-level heading line (the first line).
++    h1_lines = [ln for ln in lines if ln.startswith("# ")]
++    assert len(h1_lines) == 1, f"Expected 1 top-level heading, got: {h1_lines}"
++    # The '#' in the hostile subject must be escaped to '\#' — verify that.
++    heading = h1_lines[0]
++    assert "\\#" in heading  # the '#' in the subject is backslash-escaped
++
++
++def test_escape_hostile_claim_text():
++    """Hostile characters in claim text do not create additional headings."""
++    hostile_text = "# Injected heading\n## Another\n*bold* _em_"
++    ev = Evidence(kind="pr", ref="PR#1", url="")
++    p = Portfolio(
++        subject="alice",
++        evidence=[ev],
++        claims=[Claim(text=hostile_text, evidence_refs=["PR#1"], confidence=0.5)],
++    )
++    out = render_markdown(p)
++    lines = out.splitlines()
++    # Only two structural headings: "# Portfolio ..." and "## <escaped claim>"
++    h1_lines = [ln for ln in lines if ln.startswith("# ") and not ln.startswith("## ")]
++    assert len(h1_lines) == 1
++    # The embedded newline in the claim text must not produce a bare "## Another" line.
++    assert "## Another" not in lines
++
++
++def test_escape_backslash_in_subject():
++    """Backslashes in interpolated text are escaped (no double-processing)."""
++    p = Portfolio(subject="a\\b\\c", evidence=[], claims=[])
++    out = render_markdown(p)
++    # The heading must contain escaped backslashes, not literal ones that could
++    # be misread as escape sequences by a Markdown renderer.
++    assert "a\\\\b\\\\c" in out  # each \ becomes \\
++
++
++def test_escape_hostile_evidence_ref():
++    """Hostile characters in evidence ref are escaped in the output."""
++    hostile_ref = "[evil](http://attack.example.com)"
++    ev = Evidence(kind="pr", ref=hostile_ref, url="")
++    p = Portfolio(
++        subject="alice",
++        evidence=[ev],
++        claims=[Claim(text="Something", evidence_refs=[hostile_ref], confidence=0.7)],
++    )
++    out = render_markdown(p)
++    # The hostile ref must not appear unescaped as a Markdown link.
++    assert "[evil](http://attack.example.com)" not in out
++
++
++def test_escape_hostile_evidence_url():
++    """Hostile characters in evidence url are escaped in the output."""
++    hostile_url = "https://example.com/path[evil]?x=1"
++    ev = Evidence(kind="pr", ref="PR#1", url=hostile_url)
++    p = Portfolio(
++        subject="alice",
++        evidence=[ev],
++        claims=[Claim(text="Something", evidence_refs=["PR#1"], confidence=0.7)],
++    )
++    out = render_markdown(p)
++    # The hostile [evil] brackets must not appear unescaped.
++    assert "[evil]" not in out
++    assert "\\[evil\\]" in out
++
++
++def test_escape_hostile_evidence_detail():
++    """Hostile characters in evidence detail are escaped in the output."""
++    hostile_detail = "# Injected heading [link](http://x.com)"
++    ev = Evidence(kind="pr", ref="PR#1", url="", detail=hostile_detail)
++    p = Portfolio(
++        subject="alice",
++        evidence=[ev],
++        claims=[Claim(text="Something", evidence_refs=["PR#1"], confidence=0.7)],
++    )
++    out = render_markdown(p)
++    # The hostile detail must not create a new heading.
++    lines = out.splitlines()
++    h1_lines = [ln for ln in lines if ln.startswith("# ")]
++    assert len(h1_lines) == 1
++    # The hostile link must be escaped.
++    assert "[link](http://x.com)" not in out
++
++
++def test_escape_newline_in_subject():
++    """Embedded newlines in subject are replaced so no extra line is created."""
++    p = Portfolio(subject="line1\nline2", evidence=[], claims=[])
++    out = render_markdown(p)
++    lines = out.splitlines()
++    h1_lines = [ln for ln in lines if ln.startswith("# ")]
++    assert len(h1_lines) == 1
++
++
++# ---------------------------------------------------------------------------
++# Pure function contract
++# ---------------------------------------------------------------------------
++
++
++def test_idempotent():
++    """Calling render_markdown twice on the same Portfolio returns identical strings."""
++    p = _portfolio_with_claim()
++    assert render_markdown(p) == render_markdown(p)
++
++
++def test_no_mutation_of_portfolio():
++    """render_markdown must not mutate the input Portfolio, Claim, or Evidence objects."""
++    ev = Evidence(kind="pr", ref="PR#128", url="https://example.com/128")
++    claim = Claim(text="Did something", evidence_refs=["PR#128"], confidence=0.9)
++    p = Portfolio(subject="alice", evidence=[ev], claims=[claim])
++
++    subject_before = p.subject
++    claims_before = list(p.claims)
++    evidence_before = list(p.evidence)
++    claim_text_before = claim.text
++    claim_refs_before = list(claim.evidence_refs)
++
++    render_markdown(p)
++
++    assert p.subject == subject_before
++    assert p.claims == claims_before
++    assert p.evidence == evidence_before
++    assert claim.text == claim_text_before
++    assert claim.evidence_refs == claim_refs_before
