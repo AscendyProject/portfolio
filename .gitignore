@@ -5,3 +5,7 @@ __pycache__/
 venv/
 .venv/
 .DS_Store
+
+# redteam task run artifacts — keep only the task briefs (input.md)
+.redteam/batches/*/tasks/*/*
+!.redteam/batches/*/tasks/*/input.md
