@@ -11,8 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from portfolio.model import Claim, Evidence, Portfolio  # noqa: E402
-from resume.select import (  # noqa: E402
+from portfolio.model import Claim, Evidence, Portfolio  # noqa: E402 — after sys.path setup per test-conventions
+from resume.select import (  # noqa: E402 — after sys.path setup per test-conventions
     STOPWORDS,
     ResumeDraft,
     ScoredClaim,
@@ -186,6 +186,27 @@ def test_enforce_grounding_passes_valid_claim():
     result = enforce_grounding(scored, portfolio)
     assert len(result) == 1
     assert result[0].claim is claim
+
+
+def test_enforce_grounding_drops_empty_evidence_refs():
+    """Honesty re-check: claim with empty evidence_refs is dropped (ungrounded — cites no evidence)."""
+    claim = _claim("python developer", refs=[])  # no refs — violates grounding contract
+    portfolio = _portfolio(claims=[claim], evidence=[])
+    scored = [ScoredClaim(claim=claim, score=3, matched_keywords={"python"})]
+    result = enforce_grounding(scored, portfolio)
+    assert result == []
+
+
+def test_build_resume_drops_empty_evidence_refs():
+    """build_resume: claim with empty evidence_refs is dropped by the honesty re-check (regression)."""
+    ev = _evidence("PR#1")
+    empty_ref_claim = _claim("python cloud deployment", refs=[])  # no evidence cited
+    real_claim = _claim("kubernetes orchestration", ["PR#1"])
+    portfolio = Portfolio(subject="dave", evidence=[ev], claims=[empty_ref_claim, real_claim])
+    result = build_resume(portfolio, "python cloud deployment kubernetes orchestration", top_n=5)
+    # empty_ref_claim must be dropped; real_claim passes
+    assert all(sc.claim is not empty_ref_claim for sc in result.selected)
+    assert any(sc.claim is real_claim for sc in result.selected)
 
 
 # ── build_resume: Done-when "deterministic, subject propagated, keywords union" ─

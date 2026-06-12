@@ -123,6 +123,7 @@ def enforce_grounding(scored: list[ScoredClaim], portfolio: Portfolio) -> list[S
 
     Dropped if:
     - The Claim object is not in portfolio.claims (by object identity).
+    - The claim's evidence_refs are empty (a claim citing no evidence is ungrounded).
     - The claim's evidence_refs are not a subset of the portfolio's evidence ref set.
     Fail-closed: a failing claim is silently dropped, never returned.
     """
@@ -131,6 +132,8 @@ def enforce_grounding(scored: list[ScoredClaim], portfolio: Portfolio) -> list[S
     result: list[ScoredClaim] = []
     for sc in scored:
         if id(sc.claim) not in real_claim_ids:
+            continue
+        if not sc.claim.evidence_refs:  # empty refs — no evidence cited, reject
             continue
         if not set(sc.claim.evidence_refs) <= real_refs:
             continue
