@@ -293,7 +293,10 @@ def _write_version_stamp(target: Path, dry: bool) -> None:
     _log("stamp", VERSION_STAMP_REL + f"  (harness {version})", dry)
     if dry:
         return
-    stamp = {"version": version, "installed_from": _git_short_commit(SOURCE_ROOT), "source": str(SOURCE_ROOT)}
+    # NB: never persist the installer machine's local SOURCE_ROOT path — it leaks
+    # the install host's filesystem layout / username into a tracked file. Keep
+    # only non-sensitive version + source-commit metadata.
+    stamp = {"version": version, "installed_from": _git_short_commit(SOURCE_ROOT)}
     dst = target / VERSION_STAMP_REL
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")

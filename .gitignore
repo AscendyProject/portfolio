@@ -9,3 +9,6 @@ venv/
 # redteam task run artifacts — keep only the task briefs (input.md)
 .redteam/batches/*/tasks/*/*
 !.redteam/batches/*/tasks/*/input.md
+
+# standalone `orchestrator.py review` output — operator convenience copy, not tracked
+.redteam/last_review.md
