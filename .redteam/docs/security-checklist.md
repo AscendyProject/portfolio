@@ -1,4 +1,4 @@
-# Security checklist — ascendy-portfolio
+# Security checklist — portfolio
 
 The code-security-reviewer applies this to every diff. Each item is a **hard
 line**: a confirmed HIT escalates to `REVIEW_DECISION: CHANGES_REQUESTED`. Don't

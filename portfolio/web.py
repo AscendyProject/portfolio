@@ -29,7 +29,7 @@ _BLOCKED_HOSTNAMES = frozenset({"localhost", "localhost.localdomain", "ip6-local
 
 _TIMEOUT_SEC = 10
 _MAX_BYTES = 2_000_000  # cap the response so a huge/streaming page can't exhaust memory
-_USER_AGENT = "ascendy-portfolio/0.0 (+https://github.com/AscendyProject/ascendy-portfolio)"
+_USER_AGENT = "portfolio/0.0 (+https://github.com/AscendyProject/portfolio)"
 
 
 def _host_as_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:

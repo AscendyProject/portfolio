@@ -1,5 +1,5 @@
 [project]
-name = "ascendy-portfolio"
+name = "portfolio"
 version = "0.0.1"
 description = "Turn a developer's real GitHub work into a grounded portfolio — every claim traced to evidence, never invented."
 readme = "README.md"
