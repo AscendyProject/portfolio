@@ -1,4 +1,4 @@
-# ascendy-portfolio
+# portfolio
 
 Turn a developer's real GitHub work into a **grounded** portfolio — every claim
 traced to evidence, never invented.

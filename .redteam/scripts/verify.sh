@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ascendy-portfolio gate: ruff + pytest over OUR code (portfolio/ + tests/),
+# portfolio gate: ruff + pytest over OUR code (portfolio/ + tests/),
 # NOT the vendored harness under .redteam/.
 
 # Auto-activate a local venv if present.

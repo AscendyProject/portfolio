@@ -1,4 +1,4 @@
-# Test conventions — ascendy-portfolio
+# Test conventions — portfolio
 
 The test-author and test-verifier read this so generated tests match how the
 suite is wired. Keep it accurate; refresh it in the same change if the setup changes.

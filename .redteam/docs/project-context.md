@@ -1,4 +1,4 @@
-# ascendy-portfolio — Sub-agent context
+# portfolio — Sub-agent context
 
 Compact reference for every sub-agent. Authoritative source is `README.md`.
 
