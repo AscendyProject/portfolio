@@ -1,0 +1,5 @@
+{
+  "enabledPlugins": {
+    "redteam@ascendy-redteam": true
+  }
+}

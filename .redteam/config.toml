@@ -14,7 +14,7 @@ branch_prefix = "portfolio"
 base_branch = "main"
 
 [models]
-planner = "claude-opus-4-7"
+planner = "claude-opus-4-8"
 implementer = "claude-sonnet-4-6"
 reviewer = "codex"
 rescue = "codex"
