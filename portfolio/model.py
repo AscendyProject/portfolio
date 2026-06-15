@@ -23,7 +23,8 @@ class Evidence:
     kind: str  # one of EVIDENCE_KINDS
     ref: str  # stable id, e.g. "PR#128" / "abc1234" / "app/auth.py"
     url: str = ""  # optional link
-    detail: str = ""  # optional one-line context
+    detail: str = ""  # optional one-line context (shown in the rendered output)
+    context: str = ""  # optional longer text fed to the narrative model; NOT rendered
 
 
 @dataclass
