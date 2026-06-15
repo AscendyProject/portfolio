@@ -22,6 +22,7 @@ from portfolio.narrative import run_claude
 from portfolio.pipeline import build_from_evidence
 from portfolio.render import render_markdown
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
+from portfolio.web import fetch_html
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -30,18 +31,19 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Render a grounded portfolio from a developer's real work.",
     )
     parser.add_argument("--source-type", required=True, choices=list(known_source_types()))
-    parser.add_argument("--source", help="source URL, e.g. https://github.com/owner/repo")
+    parser.add_argument("--source", help="source URL (a github repo URL, or an article URL for --source-type web)")
     parser.add_argument("--author", help="GitHub handle whose merged PRs are the evidence")
     parser.add_argument("--max-claims", type=int, default=12, help="max claims to draft (default: 12)")
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
     return parser
 
 
-def run(argv: list[str], *, extractor=extract_merged_prs, runner=run_claude) -> int:
+def run(argv: list[str], *, extractor=extract_merged_prs, runner=run_claude, fetcher=fetch_html) -> int:
     """Execute the CLI. Returns a process exit code (0 = success).
 
-    `extractor` and `runner` are injectable seams: the defaults hit live `gh` /
-    `claude`, but tests pass fakes so no live service is required.
+    `extractor` (gh), `fetcher` (web fetch), and `runner` (model) are injectable
+    seams: the defaults hit live services, but tests pass fakes so no live
+    service is required.
     """
     args = _build_parser().parse_args(argv)
 
@@ -49,7 +51,7 @@ def run(argv: list[str], *, extractor=extract_merged_prs, runner=run_claude) -> 
     try:
         resolved = resolve_source(
             args.source_type,
-            SourceRequest(source=args.source, author=args.author, extractor=extractor),
+            SourceRequest(source=args.source, author=args.author, extractor=extractor, fetcher=fetcher),
         )
     except UnsupportedSourceError as exc:
         print(str(exc), file=sys.stderr)
