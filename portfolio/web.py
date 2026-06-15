@@ -87,37 +87,63 @@ def fetch_html(url: str) -> str:
     return raw.decode(charset, errors="replace")
 
 
-class _TitleParser(HTMLParser):
-    """Capture the text inside the first <title> element."""
+# Tags whose text content is not human-readable article body.
+_SKIP_TAGS = frozenset({"script", "style", "noscript", "template"})
+_MAX_CONTEXT_CHARS = 1500  # bound the excerpt so a huge page can't blow up the prompt
+
+
+class _ArticleParser(HTMLParser):
+    """Capture the first <title> and the visible body text, skipping the content
+    of script/style/noscript/template elements."""
 
     def __init__(self) -> None:
         super().__init__()
         self._in_title = False
-        self._done = False
-        self._parts: list[str] = []
+        self._title_done = False
+        self._title_parts: list[str] = []
+        # Per-tag open counts (NOT one shared depth) so a stray/mismatched closing
+        # tag in malformed HTML can't prematurely end a skip region.
+        self._skip_counts: dict[str, int] = {}
+        self._body_parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
-        if tag == "title" and not self._done:
+        if tag == "title" and not self._title_done:
             self._in_title = True
+        elif tag in _SKIP_TAGS:
+            self._skip_counts[tag] = self._skip_counts.get(tag, 0) + 1
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "title" and self._in_title:
             self._in_title = False
-            self._done = True
+            self._title_done = True
+        elif tag in _SKIP_TAGS and self._skip_counts.get(tag, 0) > 0:
+            self._skip_counts[tag] -= 1
 
     def handle_data(self, data: str) -> None:
-        if self._in_title and not self._done:
-            self._parts.append(data)
+        if self._in_title:
+            self._title_parts.append(data)
+        elif not any(self._skip_counts.values()):
+            self._body_parts.append(data)
 
     @property
     def title(self) -> str:
-        return "".join(self._parts).strip()
+        return "".join(self._title_parts).strip()
+
+    @property
+    def body(self) -> str:
+        # Join text nodes with a space so block-element boundaries don't fuse words
+        # ("<p>Hello</p><p>world</p>" -> "Hello world"), then collapse whitespace.
+        text = " ".join(" ".join(self._body_parts).split())
+        if len(text) > _MAX_CONTEXT_CHARS:
+            text = text[:_MAX_CONTEXT_CHARS].rstrip() + "…"
+        return text
 
 
 def extract_article_evidence(url: str, html: str) -> list[Evidence]:
-    """Pure parser: turn fetched HTML into a single article Evidence. The title is
-    passed through raw (the renderer escapes Markdown-significant text); a missing
-    title yields an empty detail rather than an invented one."""
-    parser = _TitleParser()
+    """Pure parser: turn fetched HTML into a single article Evidence. `detail` is
+    the raw `<title>` (the renderer escapes it); `context` is a bounded body
+    excerpt fed to the narrative model (not rendered). A missing title yields an
+    empty detail rather than an invented one."""
+    parser = _ArticleParser()
     parser.feed(html)
-    return [Evidence(kind="article", ref=url, url=url, detail=parser.title)]
+    return [Evidence(kind="article", ref=url, url=url, detail=parser.title, context=parser.body)]

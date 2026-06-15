@@ -64,8 +64,8 @@ def test_parse_web_source_rejects(url):
 # ---------------------------------------------------------------------------
 
 
-def test_extract_article_evidence_uses_title():
-    html = "<html><head><title>  My Great Post </title></head><body>hi</body></html>"
+def test_extract_article_evidence_uses_title_and_body():
+    html = "<html><head><title>  My Great Post </title></head><body>hi there</body></html>"
     ev = extract_article_evidence("https://blog.example.com/post", html)
     assert ev == [
         Evidence(
@@ -73,8 +73,47 @@ def test_extract_article_evidence_uses_title():
             ref="https://blog.example.com/post",
             url="https://blog.example.com/post",
             detail="My Great Post",
+            context="hi there",
         )
     ]
+
+
+def test_body_excerpt_excludes_script_and_style_and_collapses_whitespace():
+    """The body excerpt is visible text only — script/style content is skipped —
+    and runs of whitespace collapse to single spaces."""
+    html = (
+        "<html><head><title>T</title><style>.a{color:red}</style></head>"
+        "<body><p>Hello\n\n   world</p><script>var secret = 42;</script></body></html>"
+    )
+    ev = extract_article_evidence("https://blog.example.com/post", html)
+    assert ev[0].context == "Hello world"
+    assert "secret" not in ev[0].context  # script content excluded
+    assert "color" not in ev[0].context  # style content excluded
+
+
+def test_body_excerpt_separates_block_elements():
+    """Text from separate elements is space-joined, not fused (`Helloworld`)."""
+    ev = extract_article_evidence("https://blog.example.com/post", "<body><p>Hello</p><p>world</p></body>")
+    assert ev[0].context == "Hello world"
+
+
+def test_body_excerpt_excludes_skipped_content_under_malformed_nesting():
+    """A stray/mismatched closing tag must not prematurely end a skip region —
+    skipped content stays excluded even under malformed HTML."""
+    html = "<body>before<noscript>secret</style>LEAK</noscript>after</body>"
+    ev = extract_article_evidence("https://blog.example.com/post", html)
+    assert "secret" not in ev[0].context
+    assert "LEAK" not in ev[0].context
+    assert "before" in ev[0].context and "after" in ev[0].context
+
+
+def test_body_excerpt_is_truncated():
+    """A long body is truncated to the bound with a marker, so the prompt stays bounded."""
+    long_text = "word " * 1000  # ~5000 chars
+    html = f"<html><body>{long_text}</body></html>"
+    ev = extract_article_evidence("https://blog.example.com/post", html)
+    assert len(ev[0].context) <= 1501  # ~1500-char bound + the truncation marker
+    assert ev[0].context.endswith("…")
 
 
 def test_extract_article_evidence_no_title_has_empty_detail():
@@ -97,6 +136,25 @@ def test_extract_article_evidence_passes_hostile_title_through_raw():
 # ---------------------------------------------------------------------------
 # fetch_html offline guard (no network)
 # ---------------------------------------------------------------------------
+
+
+def test_context_is_not_rendered():
+    """The body excerpt (`context`) is narration material only — it must never leak
+    into the rendered Markdown, which shows ref/url/detail."""
+    from portfolio.model import Claim, Portfolio
+    from portfolio.render import render_markdown
+
+    url = "https://blog.example.com/post"
+    ev = extract_article_evidence(url, "<html><head><title>Post</title></head><body>SECRET_BODY_TEXT</body></html>")
+    assert "SECRET_BODY_TEXT" in ev[0].context  # captured as context
+    portfolio = Portfolio(
+        subject="alice",
+        evidence=ev,
+        claims=[Claim(text="Wrote Post", evidence_refs=[url], confidence=0.8, grounded=True)],
+    )
+    out = render_markdown(portfolio)
+    assert "Post" in out  # the title (detail) is rendered
+    assert "SECRET_BODY_TEXT" not in out  # the context is NOT rendered
 
 
 def test_fetch_html_refuses_non_http_scheme():
