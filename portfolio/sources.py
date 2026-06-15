@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 from portfolio.extract import extract_merged_prs
 from portfolio.model import Evidence
+from portfolio.web import extract_article_evidence, fetch_html, parse_web_source
 
 _GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
 # owner/repo segments must be clean GitHub names. This rejects %-encoding (e.g.
@@ -35,12 +36,14 @@ class UnsupportedSourceError(Exception):
 
 @dataclass(frozen=True)
 class SourceRequest:
-    """The raw CLI inputs a source handler needs. `extractor` is the injectable
-    `gh` extraction seam (handlers that don't use `gh` may ignore it)."""
+    """The raw CLI inputs a source handler needs. `extractor` (the `gh` seam) and
+    `fetcher` (the web-fetch seam) are injectable so handlers are testable without
+    a live `gh`/network; a handler ignores the seam it doesn't use."""
 
     source: str | None
     author: str | None
     extractor: Callable[..., list[Evidence]] = extract_merged_prs
+    fetcher: Callable[[str], str] = fetch_html
 
 
 @dataclass(frozen=True)
@@ -96,14 +99,28 @@ def _github_handler(request: SourceRequest) -> ResolvedSource:
     return ResolvedSource(subject=author, extract=lambda: extractor(repo=repo, author=author))
 
 
+def _web_handler(request: SourceRequest) -> ResolvedSource:
+    """Resolve a web/blog article source: validate the URL + author now, defer the
+    fetch+parse (via the injectable `fetcher`) to `extract()`."""
+    if not request.source:
+        raise ValueError("--source is required for --source-type web")
+    if not request.author:
+        raise ValueError("--author is required for --source-type web")
+    url = parse_web_source(request.source)  # validation; raises ValueError on a bad/internal URL
+    author = request.author
+    fetcher = request.fetcher
+    return ResolvedSource(subject=author, extract=lambda: extract_article_evidence(url, fetcher(url)))
+
+
 # Source type -> handler. Register a handler here to add an *implemented* source;
 # it immediately becomes CLI-usable (see `known_source_types`) with no CLI change.
 SourceHandler = Callable[[SourceRequest], ResolvedSource]
-_HANDLERS: dict[str, SourceHandler] = {"github": _github_handler}
+_HANDLERS: dict[str, SourceHandler] = {"github": _github_handler, "web": _web_handler}
 
 # Recognized source types that are intentionally NOT implemented yet — reserved
 # in the CLI choices so the user gets "not supported yet" rather than "unknown".
-_UNIMPLEMENTED_SOURCE_TYPES = ("others",)
+# (Empty now that `web` is implemented; kept as the seam for future stubs.)
+_UNIMPLEMENTED_SOURCE_TYPES: tuple[str, ...] = ()
 
 
 def known_source_types() -> tuple[str, ...]:

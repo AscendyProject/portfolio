@@ -86,12 +86,48 @@ def test_github_requires_source_and_author():
 # ---------------------------------------------------------------------------
 
 
-def test_others_is_recognized_but_unsupported():
-    """`others` is in KNOWN_SOURCE_TYPES but has no handler -> UnsupportedSourceError
-    with a "not supported yet" message."""
-    assert "others" in known_source_types()
-    with pytest.raises(UnsupportedSourceError, match="not supported yet"):
-        resolve_source("others", SourceRequest(source="https://example.com/blog", author=None))
+def test_known_source_types_are_github_and_web():
+    """Both implemented handlers are advertised to the CLI; no unimplemented stubs."""
+    assert known_source_types() == ("github", "web")
+
+
+def test_web_resolves_and_defers_fetch():
+    """`web` resolves subject==author and a deferred extract() that, when called,
+    invokes the injected fetcher and produces an article Evidence. The fetcher must
+    NOT be called until extract() is invoked."""
+    fetched: list[str] = []
+
+    def fake_fetcher(url: str) -> str:
+        fetched.append(url)
+        return "<title>Hello</title>"
+
+    resolved = resolve_source(
+        "web",
+        SourceRequest(source="https://blog.example.com/post#x", author="alice", fetcher=fake_fetcher),
+    )
+    assert resolved.subject == "alice"
+    assert fetched == []  # no fetch until extract() is called
+
+    evidence = resolved.extract()
+    assert fetched == ["https://blog.example.com/post"]  # normalized (fragment dropped)
+    assert evidence == [
+        Evidence(
+            kind="article", ref="https://blog.example.com/post", url="https://blog.example.com/post", detail="Hello"
+        )
+    ]
+
+
+def test_web_bad_url_raises_before_fetch():
+    """A bad/internal web URL is rejected by resolve_source without fetching."""
+    fetched: list[str] = []
+
+    def fake_fetcher(url: str) -> str:
+        fetched.append(url)
+        return ""
+
+    with pytest.raises(ValueError):
+        resolve_source("web", SourceRequest(source="http://localhost/x", author="alice", fetcher=fake_fetcher))
+    assert fetched == []
 
 
 def test_unknown_type_raises_unsupported():

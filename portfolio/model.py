@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# Evidence kinds the extractor can produce. A claim may only cite these.
-EVIDENCE_KINDS = ("pr", "commit", "issue", "review", "file", "release")
+# Evidence kinds an extractor can produce. A claim may only cite these.
+EVIDENCE_KINDS = ("pr", "commit", "issue", "review", "file", "release", "article")
 
 
 @dataclass(frozen=True)

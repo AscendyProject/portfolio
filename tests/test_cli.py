@@ -137,18 +137,31 @@ def test_grounding_boundary_only_grounded_claims_rendered(capsys):
 
 
 # ---------------------------------------------------------------------------
-# Done-when: --source-type others is recognized but not supported yet
+# Done-when: a `web` run renders the article as grounded evidence (injected fetcher)
 # ---------------------------------------------------------------------------
 
 
-def test_others_source_type_not_supported(capsys):
-    """ "`--source-type others` exits non-zero with the "not supported yet" message
-    and produces no Markdown document"."""
-    code = run(["--source-type", "others", "--source", "https://example.com/blog"], runner=_fake_runner)
-    captured = capsys.readouterr()
-    assert code != 0
-    assert "not supported" in captured.err.lower()
-    assert "# Portfolio" not in captured.out
+def test_web_run_renders_with_injected_fetcher(capsys):
+    """A `--source-type web` run fetches via the injected fetcher, and a claim citing
+    the article ref renders — proving the second source works end-to-end."""
+
+    def fake_fetcher(_url: str) -> str:
+        return "<html><head><title>My Post</title></head><body>x</body></html>"
+
+    def web_runner(_prompt: str) -> str:
+        return json.dumps(
+            [{"text": "Wrote My Post", "evidence_refs": ["https://blog.example.com/post"], "confidence": 0.8}]
+        )
+
+    code = run(
+        ["--source-type", "web", "--source", "https://blog.example.com/post", "--author", "alice"],
+        runner=web_runner,
+        fetcher=fake_fetcher,
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.startswith("# Portfolio")
+    assert "Wrote My Post" in out  # the grounded claim citing the article
 
 
 # ---------------------------------------------------------------------------
