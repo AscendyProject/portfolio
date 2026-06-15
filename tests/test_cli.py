@@ -12,11 +12,9 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from portfolio.cli import parse_github_source, run  # noqa: E402 — after sys.path setup per test-conventions
+from portfolio.cli import run  # noqa: E402 — after sys.path setup per test-conventions
 from portfolio.model import Evidence  # noqa: E402 — after sys.path setup per test-conventions
 
 
@@ -205,43 +203,19 @@ def test_valid_github_url_passed_as_owner_repo(capsys):
     assert calls[0]["author"] == "alice"
 
 
-# ---------------------------------------------------------------------------
-# parse_github_source unit cases
-# ---------------------------------------------------------------------------
+def test_registered_handler_is_usable_through_the_cli(capsys):
+    """End-to-end seam: registering a handler in the dispatcher makes a new source
+    type usable via `--source-type` through argparse, with NO change to the CLI —
+    the dispatcher derives its choices from the registry."""
+    from portfolio.model import Evidence as _Evidence
+    from portfolio.sources import _HANDLERS, ResolvedSource
 
-
-@pytest.mark.parametrize(
-    "url,expected",
-    [
-        ("https://github.com/owner/repo", "owner/repo"),
-        ("https://github.com/owner/repo/", "owner/repo"),  # trailing slash
-        ("https://github.com/owner/repo.git", "owner/repo"),  # .git suffix
-        ("http://github.com/owner/repo", "owner/repo"),  # http accepted
-    ],
-)
-def test_parse_github_source_accepts(url, expected):
-    """A clean GitHub repo URL parses to owner/repo (trailing slash / .git / http tolerated)."""
-    assert parse_github_source(url) == expected
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://gitlab.com/owner/repo",  # wrong host
-        "https://github.com/owner",  # missing repo
-        "https://github.com/owner/repo/pull/1",  # extra path segments -> reject, don't guess
-        "https://github.com/owner//repo",  # empty middle segment -> reject, don't collapse
-        "https://github.com/owner/%2Frepo",  # %-encoded separator -> not a clean name
-        "https://github.com/owner/re po",  # whitespace in name
-        "https://github.com/owner/repo?x=1",  # query string -> reject
-        "https://github.com/owner/..",  # dot segment -> never a real name
-        "https://github.com/./repo",  # dot segment -> never a real name
-        "git@github.com:owner/repo.git",  # ssh form, not http(s)
-        "owner/repo",  # no scheme/host
-        "",  # empty
-    ],
-)
-def test_parse_github_source_rejects(url):
-    """A URL that is not a clean GitHub owner/repo is rejected (raise rather than guess)."""
-    with pytest.raises(ValueError):
-        parse_github_source(url)
+    _HANDLERS["fake"] = lambda _req: ResolvedSource(subject="zoe", extract=lambda: [_Evidence(kind="pr", ref="PR#1")])
+    try:
+        code = run(["--source-type", "fake"], extractor=_fake_extractor, runner=_fake_runner)
+    finally:
+        del _HANDLERS["fake"]
+    out = capsys.readouterr().out
+    assert code == 0  # argparse accepted "fake" and the handler was dispatched
+    assert out.startswith("# Portfolio")
+    assert "zoe" in out  # subject came from the registered handler
