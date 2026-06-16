@@ -13,8 +13,13 @@ verification_allowlist = ["pytest", "ruff"]
 branch_prefix = "portfolio"
 base_branch = "main"
 
+# Reviewer/rescue run on Gemini via the Antigravity CLI (`agy`), replacing codex
+# (spend cap reached). gemini is a different provider family from the claude
+# worker, satisfying the cross-provider review principle. NOTE: the vendored
+# harness ships only claude/codex adapters — gemini review is driven manually
+# (agent-pair via the `agy` CLI), not through orchestrator.py yet.
 [models]
 planner = "claude-opus-4-8"
 implementer = "claude-sonnet-4-6"
-reviewer = "codex"
-rescue = "codex"
+reviewer = "gemini"
+rescue = "gemini"
