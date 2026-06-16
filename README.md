@@ -37,9 +37,20 @@ judgment*: a model writes the story; code verifies the citations.
   into grounded / rejected / needs-confirmation.
 - Tests cover the deterministic core (grounding + PR parsing).
 
-Next: the narrative layer (shell out to `claude`/`codex` to draft claims over the
-extracted evidence), then rendering, then the `/resume` harness that consumes a
-portfolio + a job description.
+### `/portfolio` command
+
+Run `python -m portfolio --source-type github --source <url> --author <handle>` (or
+`--source-type web`) to render a grounded portfolio as Markdown. The `/portfolio`
+slash command is the interactive front door.
+
+### `/resume` command
+
+Run `python -m resume --source-type <type> --source <url> --author <handle> --jd <path>`
+to render a grounded **resume** filtered by a job description. Every bullet traces to
+a real evidence ref already present in the grounded portfolio — hallucinated refs are
+rejected by `resume.select.enforce_grounding` and never appear in the output. The
+`/resume` slash command is the interactive front door; `--top-n` (default 12) caps
+rendered bullets; `--out <file>` writes to a file instead of stdout.
 
 ## Dev
 
