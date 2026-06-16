@@ -405,6 +405,35 @@ def test_grounding_gate_drops_ungrounded_reasoning():
     assert "Invented claim" not in texts
 
 
+def test_grounding_gate_drops_uncited_reasoning():
+    """'A model-authored reasoning bullet with empty evidence_refs must be dropped —
+    an uncited bullet never ships (IR-002).'"""
+    portfolio = _make_portfolio()  # evidence contains PR#1, PR#2, PR#3
+    profile_result = profile(portfolio)
+
+    def grader_with_uncited(prompt: str, temperature: int = 0) -> str:
+        return json.dumps(
+            {
+                "score": 75,
+                "reasoning": [
+                    {"text": "Cited bullet", "evidence_refs": ["PR#1"]},  # cited ✓
+                    {"text": "Uncited assertion", "evidence_refs": []},  # no refs ✗
+                ],
+            }
+        )
+
+    grade_result = grade(portfolio, profile_result, grader_with_uncited)
+
+    texts = [b["text"] for b in grade_result.reasoning]
+    assert "Cited bullet" in texts
+    assert "Uncited assertion" not in texts
+    # every surviving model bullet cites at least one real evidence ref
+    evidence_refs = {e.ref for e in portfolio.evidence}
+    for bullet in grade_result.reasoning:
+        assert bullet["evidence_refs"], "a shipped bullet must cite at least one ref"
+        assert set(bullet["evidence_refs"]).issubset(evidence_refs)
+
+
 # ---------------------------------------------------------------------------
 # Done-when: defensive parse of malformed grader response
 # ---------------------------------------------------------------------------

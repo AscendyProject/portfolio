@@ -123,9 +123,10 @@ def _parse_response(
         if not isinstance(refs, list):
             refs = []
         refs = [r for r in refs if isinstance(r, str)]
-        # Drop bullet if any ref is NOT in the portfolio's evidence set.
-        # (Empty refs: ∅ ⊆ anything → passes through.)
-        if all(r in evidence_refs_set for r in refs):
+        # Grounding gate: a model-authored bullet must cite at least one real ref.
+        # Drop it if its refs are empty OR any ref is not in the portfolio's
+        # evidence set (an uncited bullet must never ship — IR-002).
+        if refs and all(r in evidence_refs_set for r in refs):
             checked.append({"text": text_val.strip(), "evidence_refs": refs})
 
     if not checked:
