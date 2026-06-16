@@ -52,6 +52,15 @@ rejected by `resume.select.enforce_grounding` and never appear in the output. Th
 `/resume` slash command is the interactive front door; `--top-n` (default 12) caps
 rendered bullets; `--out <file>` writes to a file instead of stdout.
 
+### `/reference-check` command
+
+Run `python -m reference_check --source-type <type> --source <url> --author <handle>`
+to render a grounded **recommendation letter** for the developer. The letter is composed
+from the grounded portfolio only — every paragraph cites real evidence refs and is
+re-grounded after generation; hallucinated paragraphs are dropped by the grounding gate
+and never appear in the output. The `/reference-check` slash command is the interactive
+front door; `--out <file>` writes to a file instead of stdout.
+
 ## Dev
 
 ```bash
