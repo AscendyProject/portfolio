@@ -83,11 +83,17 @@ def parse_paragraphs(model_text: str) -> list[LetterParagraph]:
     for item in raw:
         if not isinstance(item, dict):
             continue
-        text_val = str(item.get("text", "")).strip()
+        # text must be a non-empty string — fail closed on non-string or missing
+        text_val = item.get("text")
+        if not isinstance(text_val, str) or not text_val.strip():
+            continue
+        text_val = text_val.strip()
         refs = item.get("evidence_refs")
-        refs = [r for r in refs if isinstance(r, str)] if isinstance(refs, list) else []
-        if text_val:
-            paragraphs.append(LetterParagraph(text=text_val, evidence_refs=refs))
+        # evidence_refs must be a list where EVERY element is a string —
+        # one bad element poisons the paragraph (fail closed, never coerce)
+        if not isinstance(refs, list) or not refs or not all(isinstance(r, str) for r in refs):
+            continue
+        paragraphs.append(LetterParagraph(text=text_val, evidence_refs=refs))
     return paragraphs
 
 

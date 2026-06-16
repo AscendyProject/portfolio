@@ -401,3 +401,40 @@ def test_readme_documents_reference_check():
     assert "grounded" in lower or "grounding" in lower
     # Must mention reference-check or reference_check
     assert "reference-check" in lower or "reference_check" in lower
+
+
+# ---------------------------------------------------------------------------
+# Done-when: wrong-type JSON fields in letter output → entire paragraph dropped (fail-closed)
+# ---------------------------------------------------------------------------
+
+
+def test_wrong_type_fields_in_letter_dropped_fail_closed(capsys):
+    """Wrong-type JSON fields (non-string ref in list, non-string text) drop entire paragraph fail-closed."""
+    calls = [0]
+
+    def runner(prompt: str) -> str:
+        calls[0] += 1
+        if calls[0] == 1:
+            # Valid narration
+            return json.dumps([{"text": "Built feature", "evidence_refs": ["PR#1"], "confidence": 0.9}])
+        # Paragraphs with wrong-type fields — every one must be dropped entirely
+        return json.dumps(
+            [
+                # evidence_refs contains a non-string element → whole paragraph must be dropped
+                {"text": "MIXED-REFS-PARA", "evidence_refs": ["PR#1", {"bad": "ref"}]},
+                # text is not a string → must be dropped
+                {"text": None, "evidence_refs": ["PR#1"]},
+                # evidence_refs is an integer → must be dropped
+                {"text": "INT-REFS-PARA", "evidence_refs": 42},
+            ]
+        )
+
+    code = run(_base_argv(), extractor=_fake_extractor, runner=runner)
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "MIXED-REFS-PARA" not in captured.out
+    assert "INT-REFS-PARA" not in captured.out
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+    # Zero grounded paragraphs → insufficient notice
+    assert "insufficient grounded evidence" in captured.out.lower()
