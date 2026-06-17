@@ -61,6 +61,19 @@ re-grounded after generation; hallucinated paragraphs are dropped by the groundi
 and never appear in the output. The `/reference-check` slash command is the interactive
 front door; `--out <file>` writes to a file instead of stdout.
 
+### `/rating` command
+
+Run `python -m rating --source-type <type> --source <url> --author <handle>` to produce
+a grounded **capability assessment** — a deterministic grade (S/A/B/C/D) and rubric score
+(0–100) — from the developer's real evidence. The grade is computed deterministically from
+evidence-derived metrics (volume of merged PRs, breadth of changed files, stack diversity)
+and locks a score band; a temperature-0 agent grader then picks the precise score within
+that band and writes grounding-checked reasoning. Every metric cites the exact evidence
+refs it was computed from; un-grounded reasoning is dropped. **This command does NOT
+produce an absolute percentile, global comparison, or any claim about the developer's
+standing relative to a population.** The `/rating` slash command is the interactive front
+door; `--out <file>` writes to a file instead of stdout.
+
 ## Dev
 
 ```bash
