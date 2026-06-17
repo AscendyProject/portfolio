@@ -110,7 +110,7 @@ def _parse_response(
     # Parse and grounding-check reasoning bullets.
     raw_reasoning = data.get("reasoning")
     if not isinstance(raw_reasoning, list):
-        return score, list(_SAFE_REASONING)
+        return _midpoint(score_min, score_max), list(_SAFE_REASONING)
 
     checked: list[dict] = []
     for item in raw_reasoning:

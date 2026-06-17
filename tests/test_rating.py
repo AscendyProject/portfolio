@@ -474,6 +474,25 @@ def test_defensive_parse_missing_fields():
     assert len(grade_result.reasoning) > 0
 
 
+def test_wrong_type_reasoning_falls_back_to_midpoint():
+    """'A malformed grader_runner response (reasoning is the wrong type, not a list)
+    yields midpoint + safe reasoning — a valid in-band score must not survive
+    malformed reasoning.'"""
+    portfolio = _make_portfolio()
+    profile_result = profile(portfolio)
+    midpoint = (profile_result.score_min + profile_result.score_max) // 2
+    # The assertion is only meaningful if the model's score differs from midpoint.
+    assert profile_result.score_max != midpoint
+
+    def wrong_type_reasoning(prompt: str, temperature: int = 0) -> str:
+        # Valid in-band score, but reasoning is a string, not a list of bullets.
+        return json.dumps({"score": profile_result.score_max, "reasoning": "all great"})
+
+    grade_result = grade(portfolio, profile_result, wrong_type_reasoning)
+    assert grade_result.score == midpoint  # not the model's in-band score
+    assert len(grade_result.reasoning) > 0
+
+
 # ---------------------------------------------------------------------------
 # Done-when: no-percentile lexicon in rendered output
 # ---------------------------------------------------------------------------
