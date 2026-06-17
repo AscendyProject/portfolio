@@ -13,14 +13,17 @@ Arguments (may be empty): `$ARGUMENTS`
 ## Steps
 
 1. **Gather the inputs** from `$ARGUMENTS`; ask the user for anything missing:
-   - **source type** — one of `github` or `web` (these are the source types the
-     CLI currently supports). If it's unclear, ask the user to choose:
+   - **source type** — one of `github`, `web`, or `github-author`. If it's unclear,
+     ask the user to choose:
      - `github` → a GitHub repository, evidence is the author's merged PRs (via `gh`).
      - `web` → a blog/article URL, evidence is the fetched article.
+     - `github-author` → author-wide: merged PRs across **all** repos the `gh` token
+       can see. Only `--author` is required; `--source` is not used.
+       > **Note:** output may include private repo names. Redact before sharing.
    - **source URL** — `https://github.com/<owner>/<repo>` for github, or the
-     article URL for web.
-   - **author** — the GitHub handle whose merged PRs are the evidence (github),
-     or the subject the portfolio is for (web).
+     article URL for web. Not required for `github-author`.
+   - **author** — the GitHub handle whose merged PRs are the evidence (github /
+     github-author), or the subject the portfolio is for (web).
    - optionally **--out <file>** if the user wants the Markdown written to a file
      instead of shown inline.
 

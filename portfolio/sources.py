@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from portfolio.extract import extract_merged_prs
+from portfolio.extract import extract_authored_prs, extract_merged_prs
 from portfolio.model import Evidence
 from portfolio.web import extract_article_evidence, fetch_html, parse_web_source
 
@@ -27,6 +27,9 @@ _GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
 # %2F), whitespace, and any other character that would otherwise reach
 # `gh --repo` as garbage instead of being refused up front.
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+# GitHub handle: alphanumeric + hyphens only. Leading/trailing hyphens are not
+# valid GitHub usernames; we also reject the bare "-" single-char handle.
+_AUTHOR_RE = re.compile(r"^[A-Za-z0-9-]+$")
 
 
 class UnsupportedSourceError(Exception):
@@ -36,14 +39,16 @@ class UnsupportedSourceError(Exception):
 
 @dataclass(frozen=True)
 class SourceRequest:
-    """The raw CLI inputs a source handler needs. `extractor` (the `gh` seam) and
-    `fetcher` (the web-fetch seam) are injectable so handlers are testable without
-    a live `gh`/network; a handler ignores the seam it doesn't use."""
+    """The raw CLI inputs a source handler needs. `extractor` (the `gh` seam),
+    `fetcher` (the web-fetch seam), and `author_extractor` (the author-wide `gh`
+    seam) are injectable so handlers are testable without a live `gh`/network; a
+    handler ignores the seams it doesn't use."""
 
     source: str | None
     author: str | None
     extractor: Callable[..., list[Evidence]] = extract_merged_prs
     fetcher: Callable[[str], str] = fetch_html
+    author_extractor: Callable[..., list[Evidence]] = extract_authored_prs
 
 
 @dataclass(frozen=True)
@@ -112,10 +117,34 @@ def _web_handler(request: SourceRequest) -> ResolvedSource:
     return ResolvedSource(subject=author, extract=lambda: extract_article_evidence(url, fetcher(url)))
 
 
+def _validate_github_author(author: str | None) -> str:
+    """Validate a GitHub handle: non-empty, matches [A-Za-z0-9-]+, no leading or
+    trailing hyphens. Raises ValueError on any violation."""
+    if not author:
+        raise ValueError("--author is required for --source-type github-author")
+    if not _AUTHOR_RE.match(author):
+        raise ValueError(f"invalid GitHub handle {author!r}: only letters, digits, and hyphens are allowed")
+    if author.startswith("-") or author.endswith("-"):
+        raise ValueError(f"invalid GitHub handle {author!r}: leading/trailing hyphens are not allowed")
+    return author
+
+
+def _github_author_handler(request: SourceRequest) -> ResolvedSource:
+    """Resolve an author-wide GitHub source: validate the author now, defer
+    extraction. `--source` is optional and ignored for this source type."""
+    author = _validate_github_author(request.author)
+    author_extractor = request.author_extractor
+    return ResolvedSource(subject=author, extract=lambda: author_extractor(author=author))
+
+
 # Source type -> handler. Register a handler here to add an *implemented* source;
 # it immediately becomes CLI-usable (see `known_source_types`) with no CLI change.
 SourceHandler = Callable[[SourceRequest], ResolvedSource]
-_HANDLERS: dict[str, SourceHandler] = {"github": _github_handler, "web": _web_handler}
+_HANDLERS: dict[str, SourceHandler] = {
+    "github": _github_handler,
+    "web": _web_handler,
+    "github-author": _github_author_handler,
+}
 
 # Recognized source types that are intentionally NOT implemented yet — reserved
 # in the CLI choices so the user gets "not supported yet" rather than "unknown".
