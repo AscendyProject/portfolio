@@ -4,6 +4,7 @@ __pycache__/
 .ruff_cache/
 venv/
 .venv/
+*.egg-info/
 .DS_Store
 
 # redteam task run artifacts — keep only the task briefs (input.md)
