@@ -17,11 +17,16 @@ Arguments (may be empty): `$ARGUMENTS`
 ## Steps
 
 1. **Gather the inputs** from `$ARGUMENTS`; ask the user for anything missing:
-   - **source type** — one of `github` or `web`. If unclear, ask:
+   - **source type** — one of `github`, `web`, or `github-author`. If unclear, ask:
      - `github` → a GitHub repository, evidence is the author's merged PRs (via `gh`).
      - `web` → a blog/article URL, evidence is the fetched article.
+     - `github-author` → author-wide: merged PRs across **all** repos the `gh` token
+       can see. Only `--author` is required; `--source` is not used.
+       > **Note:** output may include private repo names. Redact before sharing.
    - **source URL** — `https://github.com/<owner>/<repo>` for github, or the article URL for web.
-   - **author** — the GitHub handle (github) or subject name (web) the assessment is for.
+     Not required for `github-author`.
+   - **author** — the GitHub handle (github / github-author) or subject name (web) the
+     assessment is for.
    - optionally **--out <file>** if the user wants the Markdown written to a file instead of
      shown inline.
 

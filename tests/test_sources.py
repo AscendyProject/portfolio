@@ -86,9 +86,11 @@ def test_github_requires_source_and_author():
 # ---------------------------------------------------------------------------
 
 
-def test_known_source_types_are_github_and_web():
-    """Both implemented handlers are advertised to the CLI; no unimplemented stubs."""
-    assert known_source_types() == ("github", "web")
+def test_known_source_types_includes_github_and_web():
+    """All implemented handlers are advertised to the CLI; no unimplemented stubs."""
+    types = known_source_types()
+    assert "github" in types
+    assert "web" in types
 
 
 def test_web_resolves_and_defers_fetch():
@@ -194,3 +196,110 @@ def test_parse_github_source_rejects(url):
     """A URL that is not a clean GitHub owner/repo is rejected (raise rather than guess)."""
     with pytest.raises(ValueError):
         parse_github_source(url)
+
+
+# ---------------------------------------------------------------------------
+# resolve_source: github-author dispatch
+# ---------------------------------------------------------------------------
+
+
+def _recording_author_extractor():
+    calls: list[dict] = []
+
+    def author_extractor(**kwargs) -> list[Evidence]:
+        calls.append(kwargs)
+        return [Evidence(kind="pr", ref="org/repo#1")]
+
+    return author_extractor, calls
+
+
+def test_github_author_in_known_source_types():
+    """`known_source_types()` includes `"github-author"` — Done-when: registration."""
+    assert "github-author" in known_source_types()
+
+
+def test_github_author_resolves_subject_equals_author():
+    """`resolve_source("github-author", ...)` returns subject == author —
+    Done-when: `_HANDLERS["github-author"]` registered, subject == author."""
+    author_extractor, _ = _recording_author_extractor()
+    resolved = resolve_source(
+        "github-author",
+        SourceRequest(source=None, author="alice", author_extractor=author_extractor),
+    )
+    assert isinstance(resolved, ResolvedSource)
+    assert resolved.subject == "alice"
+
+
+def test_github_author_defers_extraction():
+    """The extractor is NOT called until `extract()` is invoked —
+    Done-when: deferred extraction seam."""
+    author_extractor, calls = _recording_author_extractor()
+    resolved = resolve_source(
+        "github-author",
+        SourceRequest(source=None, author="alice", author_extractor=author_extractor),
+    )
+    assert calls == []  # deferred
+
+    ev = resolved.extract()
+    assert len(calls) == 1
+    assert calls[0].get("author") == "alice"
+    assert ev == [Evidence(kind="pr", ref="org/repo#1")]
+
+
+def test_github_author_extractor_seam_swappable():
+    """The injected `author_extractor` is invoked exactly once when `extract()` is
+    called and receives `author` as a keyword argument — Done-when: seam swap."""
+    author_extractor, calls = _recording_author_extractor()
+    resolved = resolve_source(
+        "github-author",
+        SourceRequest(source=None, author="a-1", author_extractor=author_extractor),
+    )
+    resolved.extract()
+    assert len(calls) == 1
+    assert calls[0].get("author") == "a-1"
+
+
+def test_github_author_source_ignored():
+    """Non-None `source` is accepted but does not reach the extractor as a repo —
+    Done-when: `--source` ignored for github-author."""
+    author_extractor, calls = _recording_author_extractor()
+    resolved = resolve_source(
+        "github-author",
+        SourceRequest(
+            source="https://github.com/owner/repo",
+            author="alice",
+            author_extractor=author_extractor,
+        ),
+    )
+    resolved.extract()
+    # the extractor must not have received 'repo' in its kwargs
+    assert "repo" not in calls[0]
+
+
+@pytest.mark.parametrize(
+    "author",
+    [
+        None,  # missing
+        "",  # empty string
+        "-",  # bare hyphen (leading/trailing edge case)
+        "a b",  # space
+        "bad/handle",  # slash
+        "bad@handle",  # at-sign
+    ],
+)
+def test_github_author_invalid_author_raises(author):
+    """Missing or junk `author` values are rejected with `ValueError` —
+    Done-when: handle validation rejects junk inputs."""
+    with pytest.raises(ValueError):
+        resolve_source("github-author", SourceRequest(source=None, author=author))
+
+
+@pytest.mark.parametrize("author", ["alice", "a-1"])
+def test_github_author_valid_handles_accepted(author):
+    """Valid GitHub handles are accepted — Done-when: valid handles pass validation."""
+    author_extractor, _ = _recording_author_extractor()
+    resolved = resolve_source(
+        "github-author",
+        SourceRequest(source=None, author=author, author_extractor=author_extractor),
+    )
+    assert resolved.subject == author

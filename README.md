@@ -118,6 +118,32 @@ produce an absolute percentile, global comparison, or any claim about the develo
 standing relative to a population.** The `/rating` slash command is the interactive front
 door; `--out <file>` writes to a file instead of stdout.
 
+## Source types
+
+All five commands accept `--source-type` to select the evidence source:
+
+| `--source-type` | `--source` | `--author` | Evidence scope |
+|---|---|---|---|
+| `github` | GitHub repo URL (required) | handle (required) | merged PRs in one repo |
+| `web` | article URL (required) | name (required) | fetched article |
+| `github-author` | _(not used)_ | handle (required) | merged PRs across **all** repos the `gh` token can see |
+
+### `github-author` — author-wide evidence
+
+```bash
+python -m rating --source-type github-author --author <handle>
+python -m portfolio --source-type github-author --author <handle>
+```
+
+Runs `gh search prs --author <handle> --merged` to pull the developer's merged PRs
+across every repo the authenticated `gh` token can access (public and private), then
+enriches each PR with its changed files via `gh pr view`. All five commands support
+this source type with no additional flags.
+
+> **Private-repo names:** `gh search prs` may return PRs in private repos the token
+> can access. That is intentional — it gives the most honest self-assessment. If you
+> share the output, **redact private repo names before distributing.**
+
 ## Dev
 
 ```bash
