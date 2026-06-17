@@ -3,7 +3,26 @@
 Turn a developer's real GitHub work into a **grounded** portfolio — every claim
 traced to evidence, never invented.
 
-> Part of the Ascendy harness catalog (`/portfolio`). Status: early scaffold.
+> Part of the Ascendy harness catalog (`/portfolio`). Status: early (`0.0.x`).
+
+## Quickstart
+
+Prerequisites: **Python 3.11+** and the **GitHub CLI (`gh`) authenticated**
+(`gh auth login`) — evidence is pulled from `gh`.
+
+```bash
+git clone https://github.com/AscendyProject/portfolio
+cd portfolio
+python3 -m venv venv && source venv/bin/activate
+pip install -e ".[dev]"
+
+# Render a grounded portfolio from a developer's merged PRs:
+python -m portfolio --source-type github \
+  --source https://github.com/<owner>/<repo> --author <handle>
+```
+
+Five commands share the same grounded engine: `/portfolio`, `/resume`,
+`/reference-check`, `/fit`, `/rating` — each documented below.
 
 ## Why it's different
 
@@ -19,7 +38,7 @@ cites nothing, or cites a PR/commit/file the extractor never produced.
 
 ```
 1. extract   (deterministic)  gh → real merged PRs, changed files → Evidence
-2. narrate   (LLM, next)      a model writes contribution claims — over the
+2. narrate   (LLM)            a model writes contribution claims — over the
                               evidence it is given, citing refs by id
 3. ground    (deterministic)  every claim is checked: does each cited ref exist
                               in the extracted Evidence set? un-grounded → dropped
