@@ -16,7 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from fit.grade import GradeResult, GraderRunner, bounded_grade, default_grader_runner
+from fit.grade import GraderRunner, bounded_grade, default_grader_runner
 from fit.render import render_fit
 from fit.score import score_fit
 from portfolio.extract import extract_merged_prs

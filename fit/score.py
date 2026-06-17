@@ -6,7 +6,7 @@ Stdlib-only.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from portfolio.model import Portfolio
 from resume.select import jd_keywords

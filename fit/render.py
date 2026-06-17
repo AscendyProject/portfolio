@@ -6,7 +6,7 @@ Pure function: reuses portfolio.render._escape; no model/subprocess/network call
 from __future__ import annotations
 
 from fit.grade import GradeResult
-from fit.score import GRADE_BANDS, ScoreResult
+from fit.score import ScoreResult
 from portfolio.render import _escape
 
 
@@ -80,11 +80,11 @@ def render_fit(score_result: ScoreResult, grade_result: GradeResult) -> str:
     lines.append("")
     lines.append("| Grade | Coverage% | Score Band |")
     lines.append("|-------|-----------|------------|")
-    lines.append(f"| S     | ≥90%      | 96–100     |")
-    lines.append(f"| A     | ≥75%      | 85–95      |")
-    lines.append(f"| B     | ≥55%      | 70–84      |")
-    lines.append(f"| C     | ≥35%      | 55–69      |")
-    lines.append(f"| D     | <35%      | 0–54       |")
+    lines.append("| S     | ≥90%      | 96–100     |")
+    lines.append("| A     | ≥75%      | 85–95      |")
+    lines.append("| B     | ≥55%      | 70–84      |")
+    lines.append("| C     | ≥35%      | 55–69      |")
+    lines.append("| D     | <35%      | 0–54       |")
     lines.append("")
 
     return "\n".join(lines)
