@@ -61,6 +61,31 @@ re-grounded after generation; hallucinated paragraphs are dropped by the groundi
 and never appear in the output. The `/reference-check` slash command is the interactive
 front door; `--out <file>` writes to a file instead of stdout.
 
+### `/fit` command
+
+Run `python -m fit --source-type <type> --source <url> --author <handle> --jd <path>`
+to render a grounded **JD fit assessment** for the developer. The assessment uses a
+**two-tier hybrid**:
+
+1. **Deterministic grade (S/A/B/C/D)** — JD-coverage% is computed by matching
+   grounded portfolio claim tokens against JD keywords. The coverage% maps to a
+   grade and locks a score band (`S=96–100`, `A=85–95`, `B=70–84`, `C=55–69`,
+   `D=0–54`). This step involves no model call and is fully reproducible for the
+   same portfolio + JD.
+
+2. **Bounded agent score** — An agent picks an integer score *inside* the locked
+   band and provides grounded reasoning bullets. The score is clamped to the band;
+   any reasoning bullet citing a ref not in the portfolio evidence is dropped by
+   the grounding gate.
+
+> **Important:** `/fit` is a **rubric assessment** (keyword coverage of the JD),
+> NOT a holistic "you are N% qualified" judgment. It reflects how well the
+> developer's grounded evidence covers the JD's keywords; depth of experience,
+> years, or domain judgment are not modeled.
+
+The `/fit` slash command is the interactive front door; `--out <file>` writes to
+a file instead of stdout.
+
 ## Dev
 
 ```bash
