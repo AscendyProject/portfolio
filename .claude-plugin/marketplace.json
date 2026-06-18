@@ -1,0 +1,21 @@
+{
+  "name": "ascendy-portfolio",
+  "owner": {
+    "name": "AscendyProject"
+  },
+  "description": "Marketplace hosting the grounded portfolio harness plugin.",
+  "plugins": [
+    {
+      "name": "portfolio",
+      "source": ".",
+      "description": "Grounded portfolio/resume/reference/fit/rating commands — every claim cites real evidence (deterministic extract → narrate → ground).",
+      "commands": [
+        "./.claude/commands/portfolio.md",
+        "./.claude/commands/resume.md",
+        "./.claude/commands/reference-check.md",
+        "./.claude/commands/fit.md",
+        "./.claude/commands/rating.md"
+      ]
+    }
+  ]
+}
