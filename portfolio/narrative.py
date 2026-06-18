@@ -90,7 +90,7 @@ def run_claude(prompt: str) -> str:
     (Flags mirror the redteam reviewer adapter; re-verify against `claude --help`
     before any release.)"""
     proc = subprocess.run(
-        ["claude", "-p", "--output-format", "json", "--permission-mode", "plan"],
+        ["claude", "--print", "--output-format", "json", "--permission-mode", "plan"],
         input=prompt,
         capture_output=True,
         text=True,

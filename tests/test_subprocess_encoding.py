@@ -66,11 +66,13 @@ def test_run_gh_roundtrips_non_ascii_stdout(monkeypatch):
     test that has the faked `subprocess.run` return UTF-8 text and asserts the
     bytes survive unchanged.'
 
-    The mechanism that enables the round-trip is encoding="utf-8" on the
-    subprocess.run call.  Without it, on a cp949 host the OS decode raises
-    UnicodeDecodeError before the fake ever returns.  We assert encoding="utf-8"
-    is present AND that the text round-trips so both the mechanism and the
-    observable result are pinned in one test."""
+    Note: subprocess.run is monkeypatched, so this test does NOT exercise the
+    OS-level byte decode (the real cp949 UnicodeDecodeError happens inside the
+    real subprocess.run, which we replace). What this test pins is the *fix
+    mechanism* — that `_run_gh` passes encoding="utf-8" — together with the
+    runner returning non-ASCII stdout unchanged. The encoding="utf-8" assertion
+    is what fails against the pre-change code; the round-trip assertion guards
+    the observable contract."""
     korean_text = "한국어 PR 제목"  # Korean: "Korean PR title"
     captured: dict = {}
 

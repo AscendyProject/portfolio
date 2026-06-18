@@ -31,7 +31,7 @@ from rating.render import render_rating
 def _default_grader_runner(prompt: str, temperature: int = 0) -> str:
     """Default grader runner: deterministic claude call, JSON output."""
     proc = subprocess.run(
-        ["claude", "-p", "--output-format", "json", "--permission-mode", "plan"],
+        ["claude", "--print", "--output-format", "json", "--permission-mode", "plan"],
         input=prompt,
         capture_output=True,
         text=True,
