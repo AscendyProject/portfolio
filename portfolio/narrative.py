@@ -90,9 +90,12 @@ def run_claude(prompt: str) -> str:
     (Flags mirror the redteam reviewer adapter; re-verify against `claude --help`
     before any release.)"""
     proc = subprocess.run(
-        ["claude", "-p", prompt, "--permission-mode", "plan", "--output-format", "json"],
+        ["claude", "--print", "--output-format", "json", "--permission-mode", "plan"],
+        input=prompt,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     if proc.returncode != 0:
@@ -110,6 +113,8 @@ def run_codex(prompt: str) -> str:
         input=prompt,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     if proc.returncode != 0:
