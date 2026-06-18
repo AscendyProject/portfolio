@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
-from portfolio.web import extract_article_evidence, parse_web_source
+from portfolio.web import _ArticleParser, parse_web_source
 
 
 class JDFileReadError(Exception):
@@ -59,9 +59,14 @@ def load_jd(value: str, *, fetcher: Callable[[str], str]) -> str:
         except RuntimeError as exc:
             raise JDFetchError(str(exc)) from exc
 
-        evidence_list = extract_article_evidence(parsed_url, html)
-        ev = evidence_list[0]
-        parts = [p for p in (ev.detail, ev.context) if p]
+        # Extract the JD text directly via the article parser. We deliberately do
+        # NOT call extract_article_evidence: the JD must never become an Evidence
+        # object (it only drives selection). _ArticleParser yields the same
+        # title/body the web source uses, without constructing Evidence, and
+        # cannot raise IndexError on an empty page (parts is simply empty → "").
+        parser = _ArticleParser()
+        parser.feed(html)
+        parts = [p for p in (parser.title, parser.body) if p]
         return "\n\n".join(parts)
     else:
         # File branch

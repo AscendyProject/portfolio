@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -758,14 +759,25 @@ def test_readme_documents_jd_url_for_resume_and_fit():
     readme = Path(__file__).resolve().parents[1] / "README.md"
     assert readme.exists()
     content = readme.read_text(encoding="utf-8")
-    lower = content.lower()
-    # IR-003: "url" alone is too weak — the pre-change README already contained
-    # it (e.g. "--source <url>"), so that assertion could never have failed.
-    # Require the specific new wording that documents --jd accepting an http(s)
-    # URL, for BOTH commands, so the test genuinely traces to this change.
-    assert "--jd" in content
-    assert "http(s)" in lower or "https url" in lower or "url to a job" in lower
-    # both resume and fit must be documented as accepting a path-or-url --jd
-    assert lower.count("path-or-url") >= 2 or ("or an `http(s)` url" in lower and lower.count("`--jd`") >= 2), (
-        "README must document --jd path-or-URL for both resume and fit"
-    )
+    # IR-003: "url" alone is too weak (the pre-change README already had
+    # "--source <url>"), and counting global occurrences could pass with the
+    # http(s) wording present in only one command's section. Split into the
+    # per-command "###" sections and require EACH of resume and fit to document
+    # --jd accepting an http(s) URL independently.
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in content.splitlines():
+        m = re.match(r"^###\s+`?/?([\w-]+)", line)
+        if m:
+            current = m.group(1).lower()
+            sections[current] = []
+        elif current is not None:
+            sections[current].append(line)
+
+    for cmd in ("resume", "fit"):
+        assert cmd in sections, f"README must have a /{cmd} section"
+        body = "\n".join(sections[cmd]).lower()
+        assert "--jd" in body, f"/{cmd} section must mention --jd"
+        assert ("http(s)" in body) or ("https url" in body) or ("url to a job" in body), (
+            f"/{cmd} section must document --jd accepting an http(s) URL"
+        )
