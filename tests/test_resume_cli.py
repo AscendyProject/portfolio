@@ -373,7 +373,7 @@ def test_evidence_ref_markdown_injection_escaped(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_jd_url_fetches_and_uses_article_text_as_jd(tmp_path, capsys):
+def test_jd_url_fetches_and_uses_article_text_as_jd(tmp_path, capsys, monkeypatch):
     """'--jd https://example.com/job with a fake fetcher returning canned HTML
     exits 0; the article body becomes the JD text used downstream.'"""
     _JD_KEYWORD = "UNIQUEKEYWORD_XYZ"
@@ -385,6 +385,21 @@ def test_jd_url_fetches_and_uses_article_text_as_jd(tmp_path, capsys):
         # Claim cites PR#1 and mentions the unique keyword if it appears in JD
         text = f"Built {_JD_KEYWORD} feature" if _JD_KEYWORD in prompt else "Built generic feature"
         return json.dumps([{"text": text, "evidence_refs": ["PR#1"], "confidence": 0.9}])
+
+    # IR-002: JD drives selection via build_resume(portfolio, jd_text, top_n), NOT
+    # the narrate prompt. Spy that call to prove the FETCHED article text actually
+    # became the JD fed downstream (if load_jd were ignored, jd_text would not
+    # contain the keyword from the fetched page).
+    captured: dict[str, str] = {}
+    import resume.cli as _resume_cli
+
+    _real_build = _resume_cli.build_resume
+
+    def _spy_build(portfolio, jd_text, top_n):
+        captured["jd_text"] = jd_text
+        return _real_build(portfolio, jd_text, top_n)
+
+    monkeypatch.setattr(_resume_cli, "build_resume", _spy_build)
 
     code = run(
         [
@@ -404,6 +419,7 @@ def test_jd_url_fetches_and_uses_article_text_as_jd(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "# Resume" in out
+    assert _JD_KEYWORD in captured["jd_text"], "fetched JD must reach build_resume downstream"
 
 
 # ---------------------------------------------------------------------------

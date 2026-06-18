@@ -608,7 +608,7 @@ def test_help_exits_zero(capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_jd_url_fetches_and_uses_article_text_as_jd(tmp_path, capsys):
+def test_jd_url_fetches_and_uses_article_text_as_jd(tmp_path, capsys, monkeypatch):
     """'--jd https://example.com/job with a fake fetcher returning canned HTML
     exits 0; the article body becomes the JD text used downstream.'"""
     _JD_KEYWORD = "UNIQUEKEYWORD_FIT"
@@ -621,6 +621,21 @@ def test_jd_url_fetches_and_uses_article_text_as_jd(tmp_path, capsys):
         return json.dumps([{"text": text, "evidence_refs": ["PR#1"], "confidence": 0.9}])
 
     grader = _make_grader_runner(score=77)
+
+    # IR-002: JD drives scoring via score_fit(portfolio, jd_text), NOT the narrate
+    # prompt. Spy that call to prove the FETCHED article text actually became the
+    # JD scored downstream (if load_jd were ignored, jd_text would not contain the
+    # keyword from the fetched page).
+    captured: dict[str, str] = {}
+    import fit.cli as _fit_cli
+
+    _real_score = _fit_cli.score_fit
+
+    def _spy_score(portfolio, jd_text):
+        captured["jd_text"] = jd_text
+        return _real_score(portfolio, jd_text)
+
+    monkeypatch.setattr(_fit_cli, "score_fit", _spy_score)
 
     code = run(
         [
@@ -641,6 +656,7 @@ def test_jd_url_fetches_and_uses_article_text_as_jd(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "#" in out
+    assert _JD_KEYWORD in captured["jd_text"], "fetched JD must reach score_fit downstream"
 
 
 # ---------------------------------------------------------------------------
@@ -743,5 +759,13 @@ def test_readme_documents_jd_url_for_resume_and_fit():
     assert readme.exists()
     content = readme.read_text(encoding="utf-8")
     lower = content.lower()
-    # README must describe URL acceptance for --jd
-    assert "url" in lower
+    # IR-003: "url" alone is too weak — the pre-change README already contained
+    # it (e.g. "--source <url>"), so that assertion could never have failed.
+    # Require the specific new wording that documents --jd accepting an http(s)
+    # URL, for BOTH commands, so the test genuinely traces to this change.
+    assert "--jd" in content
+    assert "http(s)" in lower or "https url" in lower or "url to a job" in lower
+    # both resume and fit must be documented as accepting a path-or-url --jd
+    assert lower.count("path-or-url") >= 2 or ("or an `http(s)` url" in lower and lower.count("`--jd`") >= 2), (
+        "README must document --jd path-or-URL for both resume and fit"
+    )
