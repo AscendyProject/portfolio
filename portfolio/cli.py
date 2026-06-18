@@ -89,7 +89,7 @@ def run(argv: list[str], *, extractor=extract_merged_prs, runner=run_claude, fet
             print(f"failed to write --out file {args.out!r}: {exc}", file=sys.stderr)
             return 1
     else:
-        print(markdown)
+        sys.stdout.buffer.write(markdown.encode("utf-8") + b"\n")
     return 0
 
 
