@@ -366,3 +366,131 @@ def test_evidence_ref_markdown_injection_escaped(tmp_path, capsys):
     assert injected_ref not in out
     # The escaped version (backslash before ] and _) must appear instead
     assert r"PR\#1\]" in out or "PR" in out  # at minimum, the ] is escaped
+
+
+# ---------------------------------------------------------------------------
+# Done-when: --jd URL path — article text becomes JD, exit 0
+# ---------------------------------------------------------------------------
+
+
+def test_jd_url_fetches_and_uses_article_text_as_jd(tmp_path, capsys):
+    """'--jd https://example.com/job with a fake fetcher returning canned HTML
+    exits 0; the article body becomes the JD text used downstream.'"""
+    _JD_KEYWORD = "UNIQUEKEYWORD_XYZ"
+
+    def jd_fetcher(url: str) -> str:
+        return f"<html><head><title>Job Post</title></head><body>{_JD_KEYWORD} engineer needed.</body></html>"
+
+    def keyword_runner(prompt: str) -> str:
+        # Claim cites PR#1 and mentions the unique keyword if it appears in JD
+        text = f"Built {_JD_KEYWORD} feature" if _JD_KEYWORD in prompt else "Built generic feature"
+        return json.dumps([{"text": text, "evidence_refs": ["PR#1"], "confidence": 0.9}])
+
+    code = run(
+        [
+            "--source-type",
+            "github",
+            "--source",
+            "https://github.com/owner/repo",
+            "--author",
+            "alice",
+            "--jd",
+            "https://jobs.example.com/python-eng",
+        ],
+        extractor=_fake_extractor,
+        runner=keyword_runner,
+        fetcher=jd_fetcher,
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "# Resume" in out
+
+
+# ---------------------------------------------------------------------------
+# Done-when: --jd with SSRF-rejected URL exits 2, stderr has "invalid --jd URL"
+# ---------------------------------------------------------------------------
+
+
+def test_jd_ssrf_url_exits_2_with_clear_message(tmp_path, capsys):
+    """'--jd http://localhost/jd → exit 2; stderr contains a clear "invalid --jd
+    URL" message; no traceback; no resume body on stdout; extractor is not invoked.'"""
+    extractor_calls: list = []
+
+    def counting_extractor(**kwargs) -> list[Evidence]:
+        extractor_calls.append(kwargs)
+        return []
+
+    code = run(
+        [
+            "--source-type",
+            "github",
+            "--source",
+            "https://github.com/owner/repo",
+            "--author",
+            "alice",
+            "--jd",
+            "http://localhost/jd",
+        ],
+        extractor=counting_extractor,
+        runner=_fake_runner,
+    )
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "invalid --jd url" in captured.err.lower()
+    assert "Traceback" not in captured.err
+    assert "# Resume" not in captured.out
+    assert extractor_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Done-when: --jd URL with failing fetcher exits 2, stderr has failure message
+# ---------------------------------------------------------------------------
+
+
+def test_jd_url_fetcher_failure_exits_2_with_message(tmp_path, capsys):
+    """'--jd <url> with a fetcher that raises RuntimeError → exit 2; stderr
+    contains a clear failure message identifying the URL; no traceback; no
+    resume body on stdout.'"""
+
+    def failing_fetcher(url: str) -> str:
+        raise RuntimeError("connection refused")
+
+    code = run(
+        [
+            "--source-type",
+            "github",
+            "--source",
+            "https://github.com/owner/repo",
+            "--author",
+            "alice",
+            "--jd",
+            "https://jobs.example.com/eng",
+        ],
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        fetcher=failing_fetcher,
+    )
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "failed to fetch --jd url" in captured.err.lower()
+    assert "Traceback" not in captured.err
+    assert "# Resume" not in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Done-when: .claude/commands/resume.md documents --jd accepts URL or path
+# ---------------------------------------------------------------------------
+
+
+def test_resume_slash_command_documents_jd_url():
+    """'.claude/commands/resume.md describes --jd as accepting a filesystem path
+    OR an http(s) URL, and any prior "filesystem path only" wording is gone.'"""
+    commands_dir = Path(__file__).resolve().parents[1] / ".claude" / "commands"
+    resume_md = commands_dir / "resume.md"
+    assert resume_md.exists()
+    content = resume_md.read_text(encoding="utf-8")
+    lower = content.lower()
+    # Must describe URL acceptance
+    assert "url" in lower and "--jd" in lower
+    # Must not still say "filesystem path only"
+    assert "filesystem path only" not in lower

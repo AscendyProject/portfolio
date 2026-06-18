@@ -22,7 +22,7 @@ Arguments (may be empty): `$ARGUMENTS`
      article URL for web.
    - **author** — the GitHub handle whose merged PRs are the evidence (github),
      or the subject the assessment is for (web).
-   - **jd path** — filesystem path to a plain-text job description file (required).
+   - **jd path or URL** — filesystem path to a plain-text job description file, or an `http(s)` URL to a job posting page (required). When a URL is supplied the page is fetched and its article text is used as the JD.
    - optionally **--out <file>** if the user wants the Markdown written to a file
      instead of shown inline.
 
@@ -78,4 +78,4 @@ domain judgment are not modeled.
   interpolation of `$ARGUMENTS` into a single command string.
 - If the CLI reports a source type is unsupported, relay that — don't try to
   implement it here.
-- The `--jd` flag accepts a filesystem path only — do not fetch the JD from a URL.
+- The `--jd` flag accepts a filesystem path **or** an `http(s)` URL. When a URL is supplied the CLI fetches the page through an offline-SSRF-guarded layer and uses the extracted article text as the JD. Pass the URL as a separate argv token — never assemble it into a shell string.
