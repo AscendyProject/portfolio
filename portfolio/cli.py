@@ -38,12 +38,21 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run(argv: list[str], *, extractor=extract_merged_prs, runner=run_claude, fetcher=fetch_html) -> int:
+def run(
+    argv: list[str],
+    *,
+    extractor=extract_merged_prs,
+    runner=run_claude,
+    fetcher=fetch_html,
+    synthesis_runner=None,
+) -> int:
     """Execute the CLI. Returns a process exit code (0 = success).
 
-    `extractor` (gh), `fetcher` (web fetch), and `runner` (model) are injectable
-    seams: the defaults hit live services, but tests pass fakes so no live
-    service is required.
+    `extractor` (gh), `fetcher` (web fetch), `runner` (model), and
+    `synthesis_runner` (model for synthesis) are injectable seams: the defaults
+    hit live services, but tests pass fakes so no live service is required.
+    synthesis_runner defaults to None so existing tests that inject only runner=
+    continue to work (synthesis is skipped when synthesis_runner is None).
     """
     args = _build_parser().parse_args(argv)
 
@@ -66,13 +75,17 @@ def run(argv: list[str], *, extractor=extract_merged_prs, runner=run_claude, fet
     try:
         evidence = resolved.extract()
         result = build_from_evidence(
-            subject=resolved.subject, evidence=evidence, runner=runner, max_claims=args.max_claims
+            subject=resolved.subject,
+            evidence=evidence,
+            runner=runner,
+            max_claims=args.max_claims,
+            synthesis_runner=synthesis_runner,
         )
     except Exception as exc:
         print(f"failed to build portfolio: {exc}", file=sys.stderr)
         return 1
 
-    markdown = render_markdown(result.portfolio)
+    markdown = render_markdown(result.portfolio, synthesis=result.synthesis)
 
     grounding = result.grounding
     print(
@@ -95,4 +108,4 @@ def run(argv: list[str], *, extractor=extract_merged_prs, runner=run_claude, fet
 
 def main() -> None:
     """Console entrypoint: run with live services and exit with the result code."""
-    sys.exit(run(sys.argv[1:]))
+    sys.exit(run(sys.argv[1:], synthesis_runner=run_claude))

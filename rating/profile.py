@@ -50,6 +50,21 @@ _EXT_TO_LANG: dict[str, str] = {
     ".dart": "Dart",
 }
 
+# Public alias — callers outside this module should use EXT_TO_LANG.
+# The underscore name is retained so existing imports keep working.
+EXT_TO_LANG = _EXT_TO_LANG
+
+
+def language_for_ref(ref: str) -> str:
+    """Return the language name for a given file ref using the fixed extension table.
+
+    Returns 'other' for refs whose extension is not in the table (e.g. Makefile,
+    PR#1, unknown extensions).  Never guesses — a model never contributes here.
+    """
+    ext = _file_ext(ref)
+    return EXT_TO_LANG.get(ext, "other")
+
+
 # Grade → score band (fixed rubric, shown in the rendered scorecard).
 GRADE_BANDS: dict[str, tuple[int, int]] = {
     "S": (96, 100),

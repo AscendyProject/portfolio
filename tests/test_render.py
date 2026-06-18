@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from portfolio.model import Claim, Evidence, Portfolio  # noqa: E402 — after sys.path setup per test-conventions
 from portfolio.render import render_markdown  # noqa: E402 — after sys.path setup per test-conventions
+from portfolio.synthesis import HighlightBullet, SynthesisResult  # noqa: E402 — after sys.path setup per test-conventions
 
 
 # ---------------------------------------------------------------------------
@@ -300,3 +301,480 @@ def test_no_mutation_of_portfolio():
     assert p.evidence == evidence_before
     assert claim.text == claim_text_before
     assert claim.evidence_refs == claim_refs_before
+
+
+# ---------------------------------------------------------------------------
+# New layout: render order tests
+# ---------------------------------------------------------------------------
+
+
+def _make_full_portfolio() -> Portfolio:
+    """Portfolio with one PR + one file evidence, one claim citing both."""
+    return Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1"),
+            Evidence(kind="file", ref="app/main.py"),
+        ],
+        claims=[Claim(text="Built main feature", evidence_refs=["PR#1", "app/main.py"], confidence=0.9)],
+    )
+
+
+def _make_synthesis(headline: str = "Great developer", refs: list[str] | None = None) -> SynthesisResult:
+    return SynthesisResult(
+        headline=headline,
+        headline_refs=refs if refs is not None else ["PR#1"],
+        highlights=[HighlightBullet(text="Key highlight", evidence_refs=["PR#1"])],
+    )
+
+
+def test_render_order_title_then_headline_then_stats_then_groups():
+    """Non-empty portfolio with synthesis emits: title, blank, headline, blank, stats, blank, group.
+
+    Outcome: 'render test that asserts presence, order, and absence of each block
+    via line-index assertions on the output.'
+    """
+    p = _make_full_portfolio()
+    syn = _make_synthesis()
+    out = render_markdown(p, synthesis=syn)
+    lines = out.splitlines()
+
+    title_idx = next(i for i, ln in enumerate(lines) if ln.startswith("# Portfolio"))
+    headline_idx = next(i for i, ln in enumerate(lines) if ln.startswith("> "))
+    stats_idx = next(i for i, ln in enumerate(lines) if ln.startswith("**"))
+    highlights_idx = next(i for i, ln in enumerate(lines) if ln == "## Highlights")
+    group_idx = next(i for i, ln in enumerate(lines) if ln.startswith("## ") and ln != "## Highlights")
+
+    assert title_idx < headline_idx < stats_idx < highlights_idx < group_idx
+
+
+def test_render_order_without_synthesis_uses_fallback_headline():
+    """Without synthesis, the fallback headline blockquote still precedes stats.
+
+    Outcome: 'deterministic fallback headline test.'
+    """
+    p = _make_full_portfolio()
+    out = render_markdown(p, synthesis=None)
+    lines = out.splitlines()
+
+    title_idx = next(i for i, ln in enumerate(lines) if ln.startswith("# Portfolio"))
+    headline_idx = next(i for i, ln in enumerate(lines) if ln.startswith("> "))
+    stats_idx = next(i for i, ln in enumerate(lines) if ln.startswith("**"))
+
+    assert title_idx < headline_idx < stats_idx
+
+
+# ---------------------------------------------------------------------------
+# New layout: highlight bullet format
+# ---------------------------------------------------------------------------
+
+
+def test_highlight_bullet_single_ref_format():
+    """Highlight with one ref renders as '- <text> (refs: <ref>)'.
+
+    Outcome: 'the literal substring (refs: appears on every rendered highlight line.'
+    """
+    p = _make_full_portfolio()
+    syn = SynthesisResult(
+        headline="Summary",
+        headline_refs=["PR#1"],
+        highlights=[HighlightBullet(text="Did something", evidence_refs=["PR#1"])],
+    )
+    out = render_markdown(p, synthesis=syn)
+    assert "- Did something (refs: PR" in out
+    assert "(refs: " in out
+
+
+def test_highlight_bullet_multi_ref_format():
+    """Highlight with two refs renders with comma-space separator.
+
+    Outcome: 'one citing two refs ... comma-space separator.'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(kind="pr", ref="PR#1"),
+            Evidence(kind="file", ref="app/main.py"),
+        ],
+        claims=[Claim(text="Built thing", evidence_refs=["PR#1", "app/main.py"], confidence=0.9)],
+    )
+    syn = SynthesisResult(
+        headline="Summary",
+        headline_refs=["PR#1"],
+        highlights=[HighlightBullet(text="Multi ref bullet", evidence_refs=["PR#1", "app/main.py"])],
+    )
+    out = render_markdown(p, synthesis=syn)
+    # Both refs must appear in the bullet line separated by ", "
+    bullet_lines = [ln for ln in out.splitlines() if "(refs: " in ln]
+    assert len(bullet_lines) == 1
+    assert "PR" in bullet_lines[0] and "app" in bullet_lines[0]
+    assert ", " in bullet_lines[0]
+
+
+def test_highlights_section_omitted_when_no_highlights():
+    """## Highlights section is absent when synthesis.highlights is empty.
+
+    Outcome: 'otherwise the ## Highlights section is omitted entirely.'
+    """
+    p = _make_full_portfolio()
+    syn = SynthesisResult(headline="Summary", headline_refs=["PR#1"], highlights=[])
+    out = render_markdown(p, synthesis=syn)
+    assert "## Highlights" not in out
+
+
+# ---------------------------------------------------------------------------
+# New layout: deterministic fallback headline
+# ---------------------------------------------------------------------------
+
+
+def test_fallback_headline_synthesis_none():
+    """synthesis=None → deterministic fallback '> Portfolio for <subject> — N merged PRs across M repos.'
+
+    Outcome: 'render_markdown(portfolio, synthesis=None) and checks the literal blockquote line.'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(kind="pr", ref="PR#1"),
+            Evidence(kind="pr", ref="PR#2"),
+        ],
+        claims=[Claim(text="Did stuff", evidence_refs=["PR#1"], confidence=0.9)],
+    )
+    out = render_markdown(p, synthesis=None)
+    lines = out.splitlines()
+    blockquote_lines = [ln for ln in lines if ln.startswith("> ")]
+    assert len(blockquote_lines) == 1
+    bq = blockquote_lines[0]
+    assert "Portfolio for alice" in bq
+    assert "2 merged PRs across" in bq
+    assert "repos." in bq
+
+
+def test_fallback_headline_synthesis_headline_none():
+    """synthesis.headline is None → same deterministic fallback.
+
+    Outcome: 'When the renderer receives synthesis=None, or synthesis.headline is None ...'
+    """
+    p = _make_full_portfolio()
+    syn = SynthesisResult(headline=None, headline_refs=[], highlights=[])
+    out = render_markdown(p, synthesis=syn)
+    lines = out.splitlines()
+    blockquote_lines = [ln for ln in lines if ln.startswith("> ")]
+    assert len(blockquote_lines) == 1
+    assert "Portfolio for alice" in blockquote_lines[0]
+
+
+# ---------------------------------------------------------------------------
+# New layout: stats line — PR count
+# ---------------------------------------------------------------------------
+
+
+def test_stats_pr_count():
+    """<N> in stats line = count of Evidence(kind='pr').
+
+    Outcome: 'asserted by a render test that constructs a Portfolio with a mix of
+    pr / file / article evidence and checks the rendered integer.'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(kind="pr", ref="PR#1"),
+            Evidence(kind="pr", ref="PR#2"),
+            Evidence(kind="pr", ref="PR#3"),
+            Evidence(kind="file", ref="app/main.py"),
+            Evidence(kind="article", ref="https://blog.example.com/post"),
+        ],
+        claims=[Claim(text="Did stuff", evidence_refs=["PR#1"], confidence=0.9)],
+    )
+    out = render_markdown(p)
+    stats_line = next(ln for ln in out.splitlines() if ln.startswith("**"))
+    assert "3 merged PRs" in stats_line
+
+
+# ---------------------------------------------------------------------------
+# New layout: stats line — repo count
+# ---------------------------------------------------------------------------
+
+
+def test_stats_repos_all_unqualified():
+    """All bare PR#<n> refs → M=1 (single unqualified bucket).
+
+    Outcome: '(all-unqualified) ... checks the integer.'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(kind="pr", ref="PR#1"),
+            Evidence(kind="pr", ref="PR#2"),
+        ],
+        claims=[Claim(text="Did stuff", evidence_refs=["PR#1"], confidence=0.9)],
+    )
+    out = render_markdown(p)
+    stats_line = next(ln for ln in out.splitlines() if ln.startswith("**"))
+    assert "· 1 repos ·" in stats_line
+
+
+def test_stats_repos_qualified_across_two_repos():
+    """owner/repo#n and owner/repo:path refs → M=2 distinct repos.
+
+    Outcome: '(all-qualified across two repos) ... checks the integer.'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(kind="pr", ref="org/repoA#1"),
+            Evidence(kind="pr", ref="org/repoA#2"),
+            Evidence(kind="file", ref="org/repoB:src/main.py"),
+        ],
+        claims=[Claim(text="Did stuff", evidence_refs=["org/repoA#1"], confidence=0.9)],
+    )
+    out = render_markdown(p)
+    stats_line = next(ln for ln in out.splitlines() if ln.startswith("**"))
+    assert "· 2 repos ·" in stats_line
+
+
+def test_stats_repos_mixed():
+    """Mix of qualified and unqualified refs → M = distinct qualified + 1 unqualified.
+
+    Outcome: '(mixed) ... checks the integer.'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(kind="pr", ref="org/repoA#1"),
+            Evidence(kind="pr", ref="PR#2"),  # unqualified
+        ],
+        claims=[Claim(text="Did stuff", evidence_refs=["org/repoA#1"], confidence=0.9)],
+    )
+    out = render_markdown(p)
+    stats_line = next(ln for ln in out.splitlines() if ln.startswith("**"))
+    assert "· 2 repos ·" in stats_line
+
+
+# ---------------------------------------------------------------------------
+# New layout: stats line — stack summary
+# ---------------------------------------------------------------------------
+
+
+def test_stack_summary_py_and_ts():
+    """File evidence with .py and .ts → 'Python, TypeScript'.
+
+    Outcome: 'a portfolio with .py + .ts files.'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(kind="file", ref="app/main.py"),
+            Evidence(kind="file", ref="web/app.ts"),
+        ],
+        claims=[Claim(text="Did stuff", evidence_refs=["app/main.py"], confidence=0.9)],
+    )
+    out = render_markdown(p)
+    stats_line = next(ln for ln in out.splitlines() if ln.startswith("**"))
+    assert "Python, TypeScript" in stats_line
+
+
+def test_stack_summary_unknown_extension():
+    """File evidence with .unknownext only → 'no stack detected'.
+
+    Outcome: 'a portfolio with .unknownext only.'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="file", ref="data.unknownext")],
+        claims=[Claim(text="Did stuff", evidence_refs=["data.unknownext"], confidence=0.9)],
+    )
+    out = render_markdown(p)
+    stats_line = next(ln for ln in out.splitlines() if ln.startswith("**"))
+    assert "no stack detected" in stats_line
+
+
+def test_stack_summary_no_file_evidence():
+    """No file evidence at all → 'no stack detected'.
+
+    Outcome: 'a portfolio with no file evidence at all.'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="PR#1")],
+        claims=[Claim(text="Did stuff", evidence_refs=["PR#1"], confidence=0.9)],
+    )
+    out = render_markdown(p)
+    stats_line = next(ln for ln in out.splitlines() if ln.startswith("**"))
+    assert "no stack detected" in stats_line
+
+
+# ---------------------------------------------------------------------------
+# New layout: grouping rule
+# ---------------------------------------------------------------------------
+
+
+def test_grouping_majority_language():
+    """Claim with two .py and three .ts refs groups under TypeScript (majority).
+
+    Outcome: 'one citing two .py and three .ts (group = TypeScript by majority).'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(kind="file", ref="a.py"),
+            Evidence(kind="file", ref="b.py"),
+            Evidence(kind="file", ref="c.ts"),
+            Evidence(kind="file", ref="d.ts"),
+            Evidence(kind="file", ref="e.ts"),
+        ],
+        claims=[
+            Claim(
+                text="TypeScript majority claim",
+                evidence_refs=["a.py", "b.py", "c.ts", "d.ts", "e.ts"],
+                confidence=0.9,
+            )
+        ],
+    )
+    out = render_markdown(p)
+    lines = out.splitlines()
+    group_lines = [ln for ln in lines if ln.startswith("## ")]
+    assert any("TypeScript" in ln for ln in group_lines)
+
+
+def test_grouping_alphabetical_tie_break():
+    """Claim with one .py and one .ts refs groups under Python (tie → alphabetical).
+
+    Outcome: 'one citing one .py and one .ts (group = Python by alphabetical tie-break).'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(kind="file", ref="a.py"),
+            Evidence(kind="file", ref="b.ts"),
+        ],
+        claims=[
+            Claim(text="Tied claim", evidence_refs=["a.py", "b.ts"], confidence=0.9),
+        ],
+    )
+    out = render_markdown(p)
+    lines = out.splitlines()
+    group_lines = [ln for ln in lines if ln.startswith("## ")]
+    assert any("Python" in ln for ln in group_lines)
+
+
+def test_grouping_no_file_refs_is_other():
+    """Claim with no file refs → Other group.
+
+    Outcome: 'one citing no file refs (group = Other).'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="PR#1")],
+        claims=[Claim(text="PR only claim", evidence_refs=["PR#1"], confidence=0.9)],
+    )
+    out = render_markdown(p)
+    assert "## Other" in out
+
+
+# ---------------------------------------------------------------------------
+# New layout: group ordering
+# ---------------------------------------------------------------------------
+
+
+def test_group_ordering_other_always_last():
+    """Python=2, TypeScript=2, Other=3 → order is Python, TypeScript, Other.
+
+    Outcome: 'test that constructs three groups with counts Python=2, TypeScript=2,
+    Other=3 and checks the rendered order is ## Python, ## TypeScript, ## Other.'
+    """
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(kind="file", ref="a.py"),
+            Evidence(kind="file", ref="b.py"),
+            Evidence(kind="file", ref="c.ts"),
+            Evidence(kind="file", ref="d.ts"),
+            Evidence(kind="pr", ref="PR#1"),
+            Evidence(kind="pr", ref="PR#2"),
+            Evidence(kind="pr", ref="PR#3"),
+        ],
+        claims=[
+            Claim(text="Python claim 1", evidence_refs=["a.py"], confidence=0.9),
+            Claim(text="Python claim 2", evidence_refs=["b.py"], confidence=0.9),
+            Claim(text="TypeScript claim 1", evidence_refs=["c.ts"], confidence=0.9),
+            Claim(text="TypeScript claim 2", evidence_refs=["d.ts"], confidence=0.9),
+            Claim(text="Other claim 1", evidence_refs=["PR#1"], confidence=0.9),
+            Claim(text="Other claim 2", evidence_refs=["PR#2"], confidence=0.9),
+            Claim(text="Other claim 3", evidence_refs=["PR#3"], confidence=0.9),
+        ],
+    )
+    out = render_markdown(p)
+    lines = out.splitlines()
+    group_lines = [(i, ln) for i, ln in enumerate(lines) if ln.startswith("## ") and ln != "## Highlights"]
+    group_names = [ln for _, ln in group_lines]
+    group_indices = [i for i, _ in group_lines]
+
+    assert "## Python" in group_names
+    assert "## TypeScript" in group_names
+    assert "## Other" in group_names
+
+    py_idx = group_indices[group_names.index("## Python")]
+    ts_idx = group_indices[group_names.index("## TypeScript")]
+    other_idx = group_indices[group_names.index("## Other")]
+
+    assert py_idx < other_idx
+    assert ts_idx < other_idx
+
+
+# ---------------------------------------------------------------------------
+# New layout: determinism
+# ---------------------------------------------------------------------------
+
+
+def test_determinism_same_portfolio_renders_identically():
+    """Rendering the same Portfolio + SynthesisResult twice yields byte-identical strings.
+
+    Outcome: 'determinism test.'
+    """
+    p = _make_full_portfolio()
+    syn = _make_synthesis()
+    assert render_markdown(p, synthesis=syn) == render_markdown(p, synthesis=syn)
+
+
+# ---------------------------------------------------------------------------
+# New layout: empty portfolio short-circuit
+# ---------------------------------------------------------------------------
+
+
+def test_empty_portfolio_no_headline_or_stats():
+    """Empty portfolio: only title + 'no grounded claims'; no headline, stats, or groups.
+
+    Outcome: 'no headline blockquote, no stats line, no highlights, no group headings.'
+    """
+    p = Portfolio(subject="alice", evidence=[], claims=[])
+    out = render_markdown(p, synthesis=_make_synthesis())
+    assert "no grounded claims" in out
+    assert "> " not in out
+    assert "**" not in out
+    assert "## " not in out
+
+
+# ---------------------------------------------------------------------------
+# New layout: per-claim detail preserved under new layout
+# ---------------------------------------------------------------------------
+
+
+def test_per_claim_detail_preserved_with_url():
+    """Claim block still emits ref, url, and detail under the new grouped layout.
+
+    Outcome: 'render test that re-uses today's per-claim assertions on the new grouped layout.'
+    """
+    ev = Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Fixed the bug")
+    p = Portfolio(
+        subject="alice",
+        evidence=[ev],
+        claims=[Claim(text="Fixed bug in auth", evidence_refs=["PR#1"], confidence=0.85)],
+    )
+    out = render_markdown(p)
+    assert "Fixed bug in auth" in out
+    assert "0.85" in out
+    assert "PR" in out and "1" in out
+    assert "https://github.com/o/r/pull/1" in out
+    assert "Fixed the bug" in out
+    assert "---" in out
