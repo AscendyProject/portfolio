@@ -19,7 +19,14 @@ _SEARCH_FIELDS = "number,title,url,repository"
 
 
 def _run_gh(args: list[str]) -> str:
-    proc = subprocess.run(["gh", *args], capture_output=True, text=True, check=False)
+    proc = subprocess.run(
+        ["gh", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
     if proc.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)} failed (rc={proc.returncode}): {proc.stderr.strip()[:500]}")
     return proc.stdout
