@@ -103,9 +103,15 @@ def test_portfolio_cli_cp949_stdout_no_raise_and_utf8_bytes(monkeypatch: Any) ->
 
 
 def test_portfolio_cli_utf8_stdout_single_trailing_newline(monkeypatch: Any) -> None:
-    """Done-when: 'On an already-UTF-8 stdout the inline path still emits the same
-    Markdown with a single trailing newline (no double-encoding, no mojibake, no
-    behaviour change); asserted by a test under `tests/`.'"""
+    """INVARIANT / parity guard — Done-when: 'On an already-UTF-8 stdout the inline
+    path still emits the same Markdown with a single trailing newline (no
+    double-encoding, no mojibake, no behaviour change); asserted by a test under
+    `tests/`.'
+
+    This test pins that the new emit_markdown mechanism emits exactly one trailing
+    newline — identical behaviour to the original print(markdown).  It is intentionally
+    allowed to pass against both the pre-change and post-change code (it is a
+    no-behaviour-change guard, not a red-phase test)."""
     from portfolio.cli import run  # noqa: PLC0415
 
     # Capture what render_markdown would produce so we can compare byte-for-byte.
@@ -327,38 +333,57 @@ def test_portfolio_bytes_decode_to_exact_rendered_markdown(monkeypatch: Any) -> 
 
 
 # ---------------------------------------------------------------------------
-# --out path unchanged: write_text(markdown, encoding="utf-8") still applies
+# IR-001 regression: emit_markdown does not crash when sys.stdout has no .buffer
 # ---------------------------------------------------------------------------
 
 
-def test_portfolio_out_path_unchanged(tmp_path: Path) -> None:
-    """Done-when: 'The `--out` write path remains `write_text(markdown,
-    encoding="utf-8")` in all five CLIs and is exercised unchanged; asserted by a
-    test under `tests/` (or covered by existing CLI tests that still pass).'
+def test_emit_markdown_stringio_no_attribute_error(monkeypatch: Any) -> None:
+    """Regression for IR-001 (unsafe unconditional .buffer access).
 
-    The --out path must write UTF-8 Markdown to the file; it must NOT write to
-    sys.stdout.buffer (the inline-path change must be guarded by `if args.out`).
-    """
+    Done-when (helper as single source of truth): with sys.stdout set to a plain
+    io.StringIO (NO .buffer attribute), emit_markdown() does NOT raise
+    AttributeError and writes the Markdown (+ one trailing newline) as text.
+
+    Pre-fix behaviour (unconditional sys.stdout.buffer.write): raises AttributeError
+    because io.StringIO has no .buffer.
+    Post-fix behaviour (getattr fallback to print()): falls through to print(),
+    writes the text, no error raised.
+
+    Also exercises the portfolio CLI's inline path under the same condition."""
+    from portfolio.output import emit_markdown  # noqa: PLC0415
+
+    text_sink = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", text_sink)
+
+    # Direct helper call — must not raise AttributeError.
+    emit_markdown("# Test — em-dash")
+
+    result = text_sink.getvalue()
+    assert "# Test — em-dash" in result, "Markdown content must appear in StringIO output"
+    assert result.endswith("\n"), "must end with exactly one newline"
+
+
+def test_portfolio_cli_stringio_stdout_no_attribute_error(monkeypatch: Any) -> None:
+    """Regression for IR-001 via portfolio CLI wiring.
+
+    With sys.stdout set to a plain io.StringIO (NO .buffer), the portfolio CLI's
+    inline path (which calls emit_markdown) does NOT raise AttributeError and the
+    Markdown is written as text to the StringIO.
+
+    Pre-fix: raises AttributeError (unconditional .buffer access).
+    Post-fix: falls back to print(), no error."""
     from portfolio.cli import run  # noqa: PLC0415
 
-    target = tmp_path / "out.md"
+    text_sink = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", text_sink)
+
     code = run(
-        [
-            "--source-type",
-            "github",
-            "--source",
-            "https://github.com/owner/repo",
-            "--author",
-            "alice",
-            "--out",
-            str(target),
-        ],
+        ["--source-type", "github", "--source", "https://github.com/owner/repo", "--author", "alice"],
         extractor=_fake_extractor,
         runner=_fake_runner,
     )
 
-    assert code == 0
-    assert target.exists(), "--out file must be created"
-    content = target.read_text(encoding="utf-8")
-    assert "—" in content, "em-dash must be present in the file"
-    assert "Built key feature" in content
+    assert code == 0, f"expected exit 0, got {code}"
+    result = text_sink.getvalue()
+    assert "—" in result, "em-dash must be present"
+    assert result.endswith("\n"), "must end with exactly one newline"

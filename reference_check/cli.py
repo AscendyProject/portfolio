@@ -17,6 +17,7 @@ from pathlib import Path
 
 from portfolio.extract import extract_merged_prs
 from portfolio.narrative import run_claude
+from portfolio.output import emit_markdown
 from portfolio.pipeline import build_from_evidence
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
@@ -98,7 +99,7 @@ def run(
             print(f"failed to write --out file {args.out!r}: {exc}", file=sys.stderr)
             return 1
     else:
-        sys.stdout.buffer.write(markdown.encode("utf-8") + b"\n")
+        emit_markdown(markdown)
     return 0
 
 

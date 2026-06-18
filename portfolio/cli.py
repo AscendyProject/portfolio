@@ -19,6 +19,7 @@ from pathlib import Path
 
 from portfolio.extract import extract_merged_prs
 from portfolio.narrative import run_claude
+from portfolio.output import emit_markdown
 from portfolio.pipeline import build_from_evidence
 from portfolio.render import render_markdown
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
@@ -89,7 +90,7 @@ def run(argv: list[str], *, extractor=extract_merged_prs, runner=run_claude, fet
             print(f"failed to write --out file {args.out!r}: {exc}", file=sys.stderr)
             return 1
     else:
-        sys.stdout.buffer.write(markdown.encode("utf-8") + b"\n")
+        emit_markdown(markdown)
     return 0
 
 
