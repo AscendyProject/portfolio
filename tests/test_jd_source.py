@@ -1,0 +1,251 @@
+"""Unit tests for portfolio.jd_source.load_jd.
+
+Each test traces to a Done-when item in outcome.md via its docstring.
+All tests inject a fake fetcher — no live network.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from portfolio.jd_source import (  # noqa: E402
+    JDFetchError,
+    JDFileReadError,
+    JDInvalidURLError,
+    load_jd,
+)
+
+
+# ---------------------------------------------------------------------------
+# Done-when: URL branch with https:// — fetcher called once, returns article text
+# ---------------------------------------------------------------------------
+
+
+def test_https_url_calls_fetcher_once_and_returns_article_text():
+    """'URL branch with https://...: the fetcher is called exactly once with the
+    URL parse_web_source returned; the value load_jd returns is derived from the
+    fetched HTML title + body, not raw HTML.'"""
+    calls: list[str] = []
+
+    def fake_fetcher(url: str) -> str:
+        calls.append(url)
+        return "<html><head><title>Senior Python Engineer</title></head><body>We need Python skills.</body></html>"
+
+    result = load_jd("https://jobs.example.com/python-eng", fetcher=fake_fetcher)
+
+    assert len(calls) == 1
+    # The returned string must include article text, not raw HTML
+    assert "<html>" not in result
+    assert "Senior Python Engineer" in result or "Python skills" in result
+
+
+# ---------------------------------------------------------------------------
+# Done-when: URL branch with http:// — also accepted
+# ---------------------------------------------------------------------------
+
+
+def test_http_url_also_accepted():
+    """'URL branch with http://...: also accepted (scheme allowlist matches
+    parse_web_source).'"""
+
+    def fake_fetcher(url: str) -> str:
+        return "<html><head><title>Job Post</title></head><body>Go developer needed.</body></html>"
+
+    result = load_jd("http://jobs.example.com/go-eng", fetcher=fake_fetcher)
+    assert "Job Post" in result or "Go developer" in result
+
+
+# ---------------------------------------------------------------------------
+# Done-when: file branch — fetcher never called, reads utf-8
+# ---------------------------------------------------------------------------
+
+
+def test_file_branch_reads_file_and_never_calls_fetcher(tmp_path):
+    """'File branch with a real tmp_path file: read with encoding="utf-8", the
+    injected fetcher is never called.'"""
+    jd_file = tmp_path / "jd.txt"
+    jd_file.write_text("Looking for a backend engineer with Python experience.", encoding="utf-8")
+
+    calls: list[str] = []
+
+    def recording_fetcher(url: str) -> str:
+        calls.append(url)
+        return ""
+
+    result = load_jd(str(jd_file), fetcher=recording_fetcher)
+    assert result == "Looking for a backend engineer with Python experience."
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Done-when: colon-in-path is not a URL — treated as file branch
+# ---------------------------------------------------------------------------
+
+
+def test_colon_in_path_is_file_branch_not_url(tmp_path):
+    """'Colon-in-path (notes:jd.txt): treated as the file branch (scheme is
+    notes, not http/https); the fetcher is never called.'"""
+    calls: list[str] = []
+
+    def recording_fetcher(url: str) -> str:
+        calls.append(url)
+        return ""
+
+    # notes:jd.txt has scheme "notes" — routes to file branch
+    # It will fail with JDFileReadError since the path doesn't exist,
+    # but the key assertion is that fetcher is never called.
+    with pytest.raises(JDFileReadError):
+        load_jd("notes:jd.txt", fetcher=recording_fetcher)
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Done-when: non-http(s) scheme routed to file branch, fetcher not called
+# ---------------------------------------------------------------------------
+
+
+def test_ftp_scheme_routes_to_file_branch_fetcher_not_called():
+    """'Non-http(s) scheme (ftp://...): treated as the file branch (scheme is not
+    in ("http","https")); the fetcher is never called.'"""
+    calls: list[str] = []
+
+    def recording_fetcher(url: str) -> str:
+        calls.append(url)
+        return ""
+
+    with pytest.raises(JDFileReadError):
+        load_jd("ftp://files.example.com/jd.txt", fetcher=recording_fetcher)
+    assert calls == []
+
+
+def test_file_scheme_routes_to_file_branch_fetcher_not_called():
+    """'file:///etc/passwd: scheme is "file", not http/https, so routes to the
+    file branch; the fetcher is never called.'"""
+    calls: list[str] = []
+
+    def recording_fetcher(url: str) -> str:
+        calls.append(url)
+        return ""
+
+    with pytest.raises(JDFileReadError):
+        load_jd("file:///etc/passwd_nonexistent_xyz", fetcher=recording_fetcher)
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Done-when: SSRF guard — localhost/private-IP raises JDInvalidURLError, fetcher not called
+# ---------------------------------------------------------------------------
+
+
+def test_ssrf_localhost_raises_invalid_url_error():
+    """'SSRF guard: http://localhost/... causes load_jd to raise JDInvalidURLError
+    (wrapping the ValueError from parse_web_source); the fetcher is never called.'"""
+    calls: list[str] = []
+
+    def recording_fetcher(url: str) -> str:
+        calls.append(url)
+        return ""
+
+    with pytest.raises(JDInvalidURLError):
+        load_jd("http://localhost/jd.txt", fetcher=recording_fetcher)
+    assert calls == []
+
+
+def test_ssrf_127_0_0_1_raises_invalid_url_error():
+    """'SSRF guard: http://127.0.0.1/... causes load_jd to raise JDInvalidURLError;
+    the fetcher is never called.'"""
+    calls: list[str] = []
+
+    def recording_fetcher(url: str) -> str:
+        calls.append(url)
+        return ""
+
+    with pytest.raises(JDInvalidURLError):
+        load_jd("http://127.0.0.1/jd", fetcher=recording_fetcher)
+    assert calls == []
+
+
+def test_ssrf_private_ip_raises_invalid_url_error():
+    """'SSRF guard: a private-IP host causes load_jd to raise JDInvalidURLError;
+    the fetcher is never called.'"""
+    calls: list[str] = []
+
+    def recording_fetcher(url: str) -> str:
+        calls.append(url)
+        return ""
+
+    with pytest.raises(JDInvalidURLError):
+        load_jd("http://192.168.1.1/jd", fetcher=recording_fetcher)
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Done-when: fetcher failure raises JDFetchError, no print/sys.exit
+# ---------------------------------------------------------------------------
+
+
+def test_fetcher_runtime_error_raises_jd_fetch_error(capsys):
+    """'Fetcher failure: a fetcher that raises RuntimeError causes load_jd to
+    raise JDFetchError; load_jd does not print and does not call sys.exit.'"""
+
+    def failing_fetcher(url: str) -> str:
+        raise RuntimeError("connection refused")
+
+    with pytest.raises(JDFetchError) as exc_info:
+        load_jd("https://jobs.example.com/eng", fetcher=failing_fetcher)
+
+    assert "connection refused" in str(exc_info.value)
+    # load_jd must not print anything
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+# ---------------------------------------------------------------------------
+# Done-when: file-read failure raises JDFileReadError, fetcher not called
+# ---------------------------------------------------------------------------
+
+
+def test_missing_file_raises_jd_file_read_error():
+    """'File-read failure: when the path does not exist, load_jd raises
+    JDFileReadError; the fetcher is never called.'"""
+    calls: list[str] = []
+
+    def recording_fetcher(url: str) -> str:
+        calls.append(url)
+        return ""
+
+    with pytest.raises(JDFileReadError):
+        load_jd("/nonexistent/path/jd.txt", fetcher=recording_fetcher)
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Done-when: typed exception identity — three distinct classes, not aliases
+# ---------------------------------------------------------------------------
+
+
+def test_typed_exception_classes_are_distinct():
+    """'Typed exception identity: JDFileReadError, JDInvalidURLError, and
+    JDFetchError are distinct classes (not aliases), so the CLI except clauses
+    are unambiguous.'"""
+    assert JDFileReadError is not JDInvalidURLError
+    assert JDFileReadError is not JDFetchError
+    assert JDInvalidURLError is not JDFetchError
+
+    # All subclass Exception
+    assert issubclass(JDFileReadError, Exception)
+    assert issubclass(JDInvalidURLError, Exception)
+    assert issubclass(JDFetchError, Exception)
+
+    # Catching one does not catch the others
+    with pytest.raises(JDInvalidURLError):
+        try:
+            raise JDInvalidURLError("test")
+        except JDFileReadError:
+            pass  # must NOT be caught here
