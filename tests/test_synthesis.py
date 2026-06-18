@@ -446,6 +446,39 @@ def test_headline_line_cap_and_char_truncation():
         assert len(ln) <= 200
 
 
+def test_headline_char_truncation_on_a_surviving_line():
+    """Per-line 200-char truncation runs on a line that SURVIVES the 3-line cap.
+
+    The previous test's 600-char line was the 6th, removed by the line cap before
+    char-truncation could matter. Here the headline is 2 lines (within the cap) and
+    the 2nd is 600 chars, so the 200-char truncation is the assertion under test.
+    """
+    portfolio = _portfolio(
+        claims=[Claim(text="Built thing", evidence_refs=["PR#1"], confidence=0.9)],
+        evidence=[Evidence(kind="pr", ref="PR#1")],
+    )
+
+    long_line = "y" * 600
+    two_line_headline = f"short summary\n{long_line}"
+
+    def runner(prompt: str) -> str:
+        return json.dumps(
+            {
+                "headline": two_line_headline,
+                "headline_refs": ["PR#1"],
+                "highlights": [],
+            }
+        )
+
+    result = synthesize(portfolio, runner)
+    assert result.headline is not None
+    lines = result.headline.split("\n")
+    assert len(lines) == 2  # both within the 3-line cap → both survive
+    assert lines[0] == "short summary"
+    assert len(lines[1]) == 200  # the 600-char line truncated to exactly 200
+    assert lines[1] == "y" * 200
+
+
 # ---------------------------------------------------------------------------
 # Done-when: empty portfolio → synthesis runner not called
 # ---------------------------------------------------------------------------
