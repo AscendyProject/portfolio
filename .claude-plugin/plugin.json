@@ -1,0 +1,16 @@
+{
+  "name": "portfolio",
+  "description": "Grounded portfolio/resume/reference/fit/rating from a developer's real GitHub work — every claim traced to evidence, never invented.",
+  "version": "0.1.0",
+  "author": { "name": "AscendyProject" },
+  "homepage": "https://github.com/AscendyProject/portfolio",
+  "repository": "https://github.com/AscendyProject/portfolio",
+  "license": "Apache-2.0",
+  "commands": [
+    "./.claude/commands/portfolio.md",
+    "./.claude/commands/resume.md",
+    "./.claude/commands/reference-check.md",
+    "./.claude/commands/fit.md",
+    "./.claude/commands/rating.md"
+  ]
+}

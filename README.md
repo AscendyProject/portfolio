@@ -24,6 +24,26 @@ python -m portfolio --source-type github \
 Five commands share the same grounded engine: `/portfolio`, `/resume`,
 `/reference-check`, `/fit`, `/rating` — each documented below.
 
+### As a Claude Code plugin (recommended)
+
+This repo doubles as a single-plugin marketplace, so two commands install all
+five slash commands without a manual checkout:
+
+```text
+/plugin marketplace add https://github.com/AscendyProject/portfolio
+/plugin install portfolio@ascendy-portfolio
+```
+
+> The HTTPS URL works everywhere, including behind firewalls that block SSH
+> (port 22). The `AscendyProject/portfolio` shorthand also works if you have
+> GitHub SSH keys configured.
+
+Installed, the commands are namespaced under the plugin —
+`/portfolio:portfolio`, `/portfolio:resume`, `/portfolio:reference-check`,
+`/portfolio:fit`, `/portfolio:rating`. Each one shells out to the matching
+`python -m …` CLI, so the **Python 3.11+ and authenticated `gh`** prerequisites
+above still apply on the host that runs them.
+
 ## Why it's different
 
 AI portfolio/resume generators are easy to write and hard to trust — they
