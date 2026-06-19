@@ -271,6 +271,35 @@ def test_rating_cli_narration_runner_not_called(tmp_path, capsys):
     assert code == 0
 
 
+@pytest.mark.parametrize(
+    "payload,as_bytes",
+    [
+        ("this is not json at all", False),  # invalid JSON
+        ('{"schema_version": 2, "subject": "a", "evidence": [], "claims": []}', False),  # bad schema
+        (b"\xff\xfe not valid utf-8", True),  # invalid UTF-8 bytes
+    ],
+)
+def test_portfolio_cli_malformed_source_exits_2(tmp_path, capsys, payload, as_bytes):
+    """A malformed portfolio file (invalid JSON / bad schema / invalid UTF-8) reaches the
+    CLI exit-2 boundary with a clean message, never a traceback; the narration runner is
+    never called (failure happens at source resolution)."""
+    from portfolio.cli import run
+
+    bad = tmp_path / "bad.json"
+    if as_bytes:
+        bad.write_bytes(payload)
+    else:
+        bad.write_text(payload, encoding="utf-8")
+
+    def raise_on_call(_prompt):
+        raise AssertionError("narration runner must not be called for a malformed source")
+
+    code = run(["--source-type", "portfolio", "--source", str(bad)], runner=raise_on_call)
+    err = capsys.readouterr().err
+    assert code == 2
+    assert err.strip()  # a human-readable message, not an empty output or a traceback
+
+
 # ---------------------------------------------------------------------------
 # Done-when: grader seams preserved (fit)
 # ---------------------------------------------------------------------------

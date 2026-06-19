@@ -151,7 +151,9 @@ def _portfolio_handler(request: SourceRequest) -> ResolvedSource:
         raise ValueError(f"portfolio file not found: {request.source!r}")
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
+        # UnicodeDecodeError (invalid UTF-8) is a UnicodeError, NOT an OSError —
+        # catch it so a malformed file produces a clean exit-2 message, not a traceback.
         raise ValueError(f"cannot read portfolio file {request.source!r}: {exc}") from exc
     try:
         loaded = portfolio_from_json(text)

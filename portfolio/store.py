@@ -56,7 +56,9 @@ def portfolio_from_dict(data: object) -> Portfolio:
     if "schema_version" not in data:
         raise PortfolioStoreError("missing required root key: schema_version")
     sv = data["schema_version"]
-    if not isinstance(sv, int):
+    # bool is a subclass of int in Python, so `True`/`False` would otherwise pass
+    # the int check (and `True == 1`); reject bool explicitly.
+    if not isinstance(sv, int) or isinstance(sv, bool):
         raise PortfolioStoreError(f"schema_version must be an int, got {type(sv).__name__}")
     if sv != SCHEMA_VERSION:
         raise PortfolioStoreError(f"unsupported schema_version {sv!r}; expected {SCHEMA_VERSION}")
@@ -112,7 +114,7 @@ def portfolio_from_dict(data: object) -> Portfolio:
         for j, r in enumerate(c["evidence_refs"]):
             if not isinstance(r, str):
                 raise PortfolioStoreError(f"claims[{i}].evidence_refs[{j}] must be a str")
-        if not isinstance(c["confidence"], (int, float)):
+        if not isinstance(c["confidence"], (int, float)) or isinstance(c["confidence"], bool):
             raise PortfolioStoreError(f"claims[{i}].confidence must be a number")
         if not isinstance(c["needs_user_confirmation"], bool):
             raise PortfolioStoreError(f"claims[{i}].needs_user_confirmation must be a bool")

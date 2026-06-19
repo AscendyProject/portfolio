@@ -128,6 +128,26 @@ def test_to_dict_claim_fields():
         ({"schema_version": 1, "subject": "a", "claims": []}, "evidence"),
         # missing required root key (claims)
         ({"schema_version": 1, "subject": "a", "evidence": []}, "claims"),
+        # bool schema_version: True must NOT pass as 1 (bool is a subclass of int)
+        ({"schema_version": True, "subject": "a", "evidence": [], "claims": []}, "schema_version"),
+        # bool confidence: True must NOT pass as a number
+        (
+            {
+                "schema_version": 1,
+                "subject": "a",
+                "evidence": [],
+                "claims": [
+                    {
+                        "text": "t",
+                        "evidence_refs": [],
+                        "confidence": True,
+                        "needs_user_confirmation": False,
+                        "grounded": True,
+                    }
+                ],
+            },
+            "confidence",
+        ),
     ],
 )
 def test_defensive_parse_dict_errors(bad_data, match):
