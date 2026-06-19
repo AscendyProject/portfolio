@@ -19,7 +19,7 @@ from portfolio.extract import extract_merged_prs
 from portfolio.jd_source import JDFetchError, JDFileReadError, JDInvalidURLError, load_jd
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
-from portfolio.pipeline import resolve_and_optionally_mask, resolve_to_build_result
+from portfolio.pipeline import resolve_and_optionally_mask
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
 from resume.render import render_resume
@@ -37,8 +37,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--jd", required=True, help="path to the job description file (plain text)")
     parser.add_argument("--top-n", type=int, default=12, help="max resume bullets to render (default: 12)")
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
-    parser.add_argument("--mask-private", action="store_true", default=False,
-                        help="anonymize private GitHub repo names in output")
+    parser.add_argument(
+        "--mask-private", action="store_true", default=False, help="anonymize private GitHub repo names in output"
+    )
     return parser
 
 

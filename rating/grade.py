@@ -27,8 +27,8 @@ GraderRunner = Callable[..., str]
 @dataclass
 class GradeResult:
     score: int
-    grade: str                    # always == profile_result.grade; model cannot change this
-    reasoning: list[dict]         # grounding-checked bullets: [{"text": ..., "evidence_refs": [...]}]
+    grade: str  # always == profile_result.grade; model cannot change this
+    reasoning: list[dict]  # grounding-checked bullets: [{"text": ..., "evidence_refs": [...]}]
 
 
 def _build_prompt(portfolio: Portfolio, profile_result: ProfileResult) -> str:
@@ -40,10 +40,10 @@ def _build_prompt(portfolio: Portfolio, profile_result: ProfileResult) -> str:
     score_min = profile_result.score_min
     score_max = profile_result.score_max
 
-    claims_text = "\n".join(
-        f"- {c.text} (refs: {', '.join(c.evidence_refs)})"
-        for c in portfolio.claims
-    ) or "(no grounded claims)"
+    claims_text = (
+        "\n".join(f"- {c.text} (refs: {', '.join(c.evidence_refs)})" for c in portfolio.claims)
+        or "(no grounded claims)"
+    )
 
     allowed_refs = ", ".join(e.ref for e in portfolio.evidence) or "(none)"
 
@@ -149,9 +149,7 @@ def grade(
     """
     prompt = _build_prompt(portfolio, profile_result)
     raw = grader_runner(prompt, temperature=0)
-    score, reasoning = _parse_response(
-        raw, portfolio, profile_result.score_min, profile_result.score_max
-    )
+    score, reasoning = _parse_response(raw, portfolio, profile_result.score_min, profile_result.score_max)
     return GradeResult(
         score=score,
         grade=profile_result.grade,  # model cannot change the grade

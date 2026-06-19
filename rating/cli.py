@@ -21,7 +21,7 @@ from pathlib import Path
 from portfolio.extract import extract_merged_prs
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
-from portfolio.pipeline import resolve_and_optionally_mask, resolve_to_build_result
+from portfolio.pipeline import resolve_and_optionally_mask
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
 from rating.grade import grade
@@ -57,8 +57,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source", help="source URL (a GitHub repo URL, or an article URL for --source-type web)")
     parser.add_argument("--author", help="GitHub handle whose merged PRs are the evidence")
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
-    parser.add_argument("--mask-private", action="store_true", default=False,
-                        help="anonymize private GitHub repo names in output")
+    parser.add_argument(
+        "--mask-private", action="store_true", default=False, help="anonymize private GitHub repo names in output"
+    )
     return parser
 
 
