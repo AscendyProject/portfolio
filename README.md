@@ -233,6 +233,11 @@ a model wrote into claim text (e.g. "billing service") are **not** masked. Free 
 `evidence.detail`, `evidence.context`, and `claim.text` is a *substitution target* (already-
 discovered private repo names are replaced in them), but never a *discovery source*.
 
+To avoid masking ordinary file paths, a candidate whose repo segment ends in a common
+source-file extension (e.g. `app/auth.py`) is treated as a path, not a repo, and is **not**
+discovered. Trade-off: a real repository literally named `*.py` / `*.js` / etc. would be
+skipped — vanishingly rare in practice.
+
 ## Dev
 
 ```bash
