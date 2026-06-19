@@ -16,6 +16,10 @@ from urllib.parse import urlparse
 from .model import Claim, Evidence, Portfolio
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+# Matches owner/repo#<digits> — strictly digits after #
+_PR_REF_RE = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$")
+# Matches owner/repo:<non-empty-path>
+_FILE_REF_RE = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+):(.+)$")
 
 _GITHUB_HOST = "github.com"
 
@@ -37,20 +41,23 @@ def _parse_ref(ref: str) -> str | None:
     """Parse an evidence ref or claim evidence_ref entry.
 
     Handles:
-      - owner/repo#<n>  (PR ref)
-      - owner/repo:<path>  (file ref with owner prefix)
+      - owner/repo#<n>  (PR ref — <n> must be digits only)
+      - owner/repo:<path>  (file ref — <path> must be non-empty)
 
     Returns owner/repo string if valid, else None.
-    Bare refs like 'PR#5' or 'app/auth.py' yield None.
+    Bare refs like 'PR#5', 'app/auth.py', or 'app/auth.py#anchor' yield None.
     """
-    if "#" in ref:
-        candidate = ref.split("#")[0]
+    m = _PR_REF_RE.match(ref)
+    if m:
+        candidate = m.group(1)
         if _is_valid_owner_repo(candidate):
             return candidate
-    elif ":" in ref:
-        candidate = ref.split(":", 1)[0]
-        if _is_valid_owner_repo(candidate):
-            return candidate
+    else:
+        m2 = _FILE_REF_RE.match(ref)
+        if m2:
+            candidate = m2.group(1)
+            if _is_valid_owner_repo(candidate):
+                return candidate
     return None
 
 
@@ -153,9 +160,13 @@ def _rewrite_ref(ref: str, relabel: dict[str, str]) -> str:
 
 
 def _rewrite_text(text: str, relabel: dict[str, str]) -> str:
-    """Replace all private owner/repo substrings in free text."""
-    for repo, label in relabel.items():
-        text = text.replace(repo, label)
+    """Replace all private owner/repo substrings in free text.
+
+    Longest names first to avoid partial-name collision (e.g. org/repo-tools
+    must not be mis-replaced when org/repo is a shorter private name).
+    """
+    for repo in sorted(relabel, key=len, reverse=True):
+        text = text.replace(repo, relabel[repo])
     return text
 
 
@@ -195,10 +206,10 @@ def mask_portfolio(portfolio: Portfolio, private: set[str]) -> Portfolio:
     new_evidence = []
     for ev in portfolio.evidence:
         new_ref = _rewrite_ref(ev.ref, relabel)
-        # URL: replace owner/repo substring
+        # URL: replace owner/repo substring — longest names first (collision-safe)
         new_url = ev.url
-        for repo, label in relabel.items():
-            new_url = new_url.replace(repo, label)
+        for repo in sorted(relabel, key=len, reverse=True):
+            new_url = new_url.replace(repo, relabel[repo])
         new_detail = _rewrite_text(ev.detail, relabel)
         new_context = _rewrite_text(ev.context, relabel)
         new_evidence.append(

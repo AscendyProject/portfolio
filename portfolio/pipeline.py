@@ -5,7 +5,7 @@ is shipped silently."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .extract import extract_merged_prs
 from .grounding import GroundingResult, check_claims
@@ -19,6 +19,7 @@ class BuildResult:
     portfolio: Portfolio  # subject + evidence + grounded claims only
     grounding: GroundingResult  # full partition (grounded / rejected / needs_confirmation)
     synthesis: SynthesisResult | None = None  # grounded headline + highlights; None when skipped
+    relabel: dict[str, str] = field(default_factory=dict)  # private-repo-N map; empty when mask_private=False
 
 
 def build_from_evidence(
@@ -133,13 +134,13 @@ def resolve_and_optionally_mask(
     repos = extract_repo_names(no_synth_result.portfolio)
     priv = private_repos(repos, visibility_lookup=lk)
     masked_portfolio = mask_portfolio(no_synth_result.portfolio, priv)
+    relabel = _build_relabel_map(priv)
 
     # Run synthesis on the masked portfolio (if requested)
     synthesis: SynthesisResult | None = None
     if synthesis_runner is not None and masked_portfolio.claims:
         raw_synthesis = synthesize(masked_portfolio, synthesis_runner)
         # Post-synthesis scrub: replace private owner/repo in text fields
-        relabel = _build_relabel_map(priv)
         if relabel and raw_synthesis is not None:
             # Scrub headline
             new_headline = raw_synthesis.headline
@@ -183,6 +184,7 @@ def resolve_and_optionally_mask(
             portfolio=masked_portfolio,
             grounding=no_synth_result.grounding,
             synthesis=synthesis,
+            relabel=relabel,
         ),
         len(priv),
     )

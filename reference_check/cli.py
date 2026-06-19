@@ -93,6 +93,29 @@ def run(
         print(f"failed to build letter: {exc}", file=sys.stderr)
         return 1
 
+    # Post-model scrub: replace any private owner/repo the letter runner emitted
+    if args.mask_private and result.relabel:
+        from reference_check.letter import LetterDraft, LetterParagraph
+
+        def _scrub(s: str) -> str:
+            for repo in sorted(result.relabel, key=len, reverse=True):
+                s = s.replace(repo, result.relabel[repo])
+            return s
+
+        scrubbed_paragraphs = [
+            LetterParagraph(
+                text=_scrub(para.text),
+                evidence_refs=[_scrub(r) for r in para.evidence_refs],
+                grounded=para.grounded,
+            )
+            for para in draft.paragraphs
+        ]
+        draft = LetterDraft(
+            subject=draft.subject,
+            paragraphs=scrubbed_paragraphs,
+            rejected_paragraphs=draft.rejected_paragraphs,
+        )
+
     markdown = render_letter(draft)
 
     # Grounding summary on stderr only.

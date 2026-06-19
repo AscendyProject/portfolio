@@ -115,6 +115,24 @@ def run(
     # Bounded agent grade (grader_runner called with temperature=0)
     grade_result = bounded_grade(result.portfolio, score_result.grade, score_result.band, grader_runner)
 
+    # Post-model scrub: replace any private owner/repo the grader emitted
+    if args.mask_private and result.relabel:
+        from fit.grade import GradeResult as _GradeResult
+
+        def _scrub(s: str) -> str:
+            for repo in sorted(result.relabel, key=len, reverse=True):
+                s = s.replace(repo, result.relabel[repo])
+            return s
+
+        scrubbed_reasoning = [
+            {
+                "text": _scrub(b.get("text", "")),
+                "evidence_refs": [_scrub(r) for r in b.get("evidence_refs", [])],
+            }
+            for b in grade_result.reasoning
+        ]
+        grade_result = _GradeResult(score=grade_result.score, reasoning=scrubbed_reasoning)
+
     markdown = render_fit(score_result, grade_result)
 
     # Grounding summary → stderr only
