@@ -781,3 +781,93 @@ def test_readme_documents_jd_url_for_resume_and_fit():
         assert ("http(s)" in body) or ("https url" in body) or ("url to a job" in body), (
             f"/{cmd} section must document --jd accepting an http(s) URL"
         )
+
+
+# ---------------------------------------------------------------------------
+# Done-when: render_fit / CLI show_refs toggle
+# ---------------------------------------------------------------------------
+
+
+def test_render_fit_hides_refs_by_default(tmp_path):
+    """'render_fit with show_refs=False (default): no _(refs: …)_ or — refs in output.'"""
+    from fit.render import render_fit
+
+    portfolio = _make_portfolio(refs=["PR#1"], claim_text="python backend service")
+    score_result = score_fit(portfolio, "python backend engineer")
+
+    runner = _make_grader_runner(score=77, reasoning=[{"text": "solid match", "evidence_refs": ["PR#1"]}])
+    grade_result = bounded_grade(portfolio, score_result.grade, score_result.band, runner)
+
+    markdown = render_fit(score_result, grade_result)
+    assert "_(refs:" not in markdown
+    # covered requirements show keyword only, no — refs suffix
+    for line in markdown.splitlines():
+        if line.startswith("- `"):
+            assert " — " not in line
+
+
+def test_render_fit_shows_refs_with_show_refs(tmp_path):
+    """'render_fit with show_refs=True: refs suffix appears in covered and reasoning.'"""
+    from fit.render import render_fit
+
+    portfolio = _make_portfolio(refs=["PR#1"], claim_text="python backend service")
+    score_result = score_fit(portfolio, "python backend engineer")
+    # Ensure there is at least one covered keyword
+    assert score_result.covered, "fixture must cover at least one JD keyword"
+
+    runner = _make_grader_runner(score=77, reasoning=[{"text": "solid match", "evidence_refs": ["PR#1"]}])
+    grade_result = bounded_grade(portfolio, score_result.grade, score_result.band, runner)
+
+    markdown = render_fit(score_result, grade_result, show_refs=True)
+    # Covered requirements have — refs suffix
+    covered_lines = [ln for ln in markdown.splitlines() if ln.startswith("- `")]
+    assert any(" — " in ln for ln in covered_lines), "show_refs=True must add — refs to covered keywords"
+    # Reasoning has _(refs: …)_ suffix
+    assert "_(refs:" in markdown
+
+
+def test_fit_cli_show_refs_default_hides_refs(tmp_path, capsys):
+    """'CLI without --show-refs: stdout has no _(refs: …)_ or covered — refs suffix.'"""
+    jd_path = _make_jd(tmp_path, "python backend engineer")
+    grader = _make_grader_runner(score=77, reasoning=[{"text": "solid", "evidence_refs": ["PR#1"]}])
+
+    code = run(
+        _base_argv(jd_path),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=grader,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "_(refs:" not in captured.out
+
+
+def test_fit_cli_show_refs_reveals_refs(tmp_path, capsys):
+    """'CLI with --show-refs: stdout contains refs for a fixture that has covered refs.'"""
+    jd_path = _make_jd(tmp_path, "python backend engineer")
+    grader = _make_grader_runner(score=77, reasoning=[{"text": "solid", "evidence_refs": ["PR#1"]}])
+
+    code = run(
+        _base_argv(jd_path) + ["--show-refs"],
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=grader,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    # show_refs=True: refs appear (reasoning _(refs: …)_ suffix)
+    assert "_(refs:" in captured.out
+
+
+def test_fit_cli_show_refs_stderr_summary_unchanged(tmp_path, capsys):
+    """'stderr grounded/rejected/needs-confirmation appears with and without --show-refs.'"""
+    jd_path = _make_jd(tmp_path, "python backend engineer")
+    grader = _make_grader_runner(score=77)
+
+    run(_base_argv(jd_path), extractor=_fake_extractor, runner=_fake_runner, grader_runner=grader)
+    err1 = capsys.readouterr().err
+    assert "grounded:" in err1
+
+    run(_base_argv(jd_path) + ["--show-refs"], extractor=_fake_extractor, runner=_fake_runner, grader_runner=grader)
+    err2 = capsys.readouterr().err
+    assert "grounded:" in err2

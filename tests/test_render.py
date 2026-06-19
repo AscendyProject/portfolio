@@ -68,8 +68,8 @@ def test_claim_confidence_rendered():
     assert "0.85" in out
 
 
-def test_claim_evidence_ref_rendered():
-    """Each cited evidence ref appears in the output."""
+def test_claim_evidence_ref_hidden_by_default():
+    """By default (show_refs=False), evidence refs do NOT appear in the output."""
     ev = Evidence(kind="pr", ref="PR#128", url="https://example.com/128")
     p = Portfolio(
         subject="alice",
@@ -77,12 +77,25 @@ def test_claim_evidence_ref_rendered():
         claims=[Claim(text="Did something", evidence_refs=["PR#128"], confidence=0.9)],
     )
     out = render_markdown(p)
+    # Ref number must not appear (stats line shows "1 merged PRs" but not "128")
+    assert "128" not in out
+
+
+def test_claim_evidence_ref_rendered_with_show_refs():
+    """With show_refs=True, each cited evidence ref appears in the output."""
+    ev = Evidence(kind="pr", ref="PR#128", url="https://example.com/128")
+    p = Portfolio(
+        subject="alice",
+        evidence=[ev],
+        claims=[Claim(text="Did something", evidence_refs=["PR#128"], confidence=0.9)],
+    )
+    out = render_markdown(p, show_refs=True)
     # The ref may be escaped (e.g. "PR\#128") — check the unescaped digits are present
     assert "PR" in out and "128" in out
 
 
-def test_evidence_url_rendered_when_present():
-    """When the looked-up Evidence has a non-empty url it appears in the output."""
+def test_evidence_url_hidden_by_default():
+    """By default (show_refs=False), the Evidence url is NOT emitted in the output."""
     ev = Evidence(kind="pr", ref="PR#128", url="https://github.com/alice/repo/pull/128")
     p = Portfolio(
         subject="alice",
@@ -90,29 +103,41 @@ def test_evidence_url_rendered_when_present():
         claims=[Claim(text="Token rotation", evidence_refs=["PR#128"], confidence=0.9)],
     )
     out = render_markdown(p)
+    assert "https://github.com/alice/repo/pull/128" not in out
+
+
+def test_evidence_url_rendered_when_present_with_show_refs():
+    """With show_refs=True, a non-empty Evidence url appears in the output."""
+    ev = Evidence(kind="pr", ref="PR#128", url="https://github.com/alice/repo/pull/128")
+    p = Portfolio(
+        subject="alice",
+        evidence=[ev],
+        claims=[Claim(text="Token rotation", evidence_refs=["PR#128"], confidence=0.9)],
+    )
+    out = render_markdown(p, show_refs=True)
     assert "https://github.com/alice/repo/pull/128" in out
 
 
 def test_no_fabricated_url_when_evidence_url_empty():
-    """No URL is emitted for a ref whose Evidence.url is empty."""
+    """No URL is emitted for a ref whose Evidence.url is empty (even with show_refs=True)."""
     ev = Evidence(kind="pr", ref="PR#128", url="")
     p = Portfolio(
         subject="alice",
         evidence=[ev],
         claims=[Claim(text="Token rotation", evidence_refs=["PR#128"], confidence=0.9)],
     )
-    out = render_markdown(p)
+    out = render_markdown(p, show_refs=True)
     assert "http" not in out
 
 
 def test_no_fabricated_url_for_ref_absent_from_evidence():
-    """No URL is emitted when the cited ref has no matching Evidence entry at all."""
+    """No URL is emitted when the cited ref has no matching Evidence entry at all (even with show_refs=True)."""
     p = Portfolio(
         subject="alice",
         evidence=[],  # empty evidence set
         claims=[Claim(text="Something", evidence_refs=["PR#999"], confidence=0.7)],
     )
-    out = render_markdown(p)
+    out = render_markdown(p, show_refs=True)
     assert "http" not in out
 
 
@@ -135,8 +160,8 @@ def test_multiple_claims_all_rendered():
     assert "0.60" in out
 
 
-def test_evidence_detail_rendered_when_present():
-    """Evidence detail text appears in the output when non-empty."""
+def test_evidence_detail_hidden_by_default():
+    """By default (show_refs=False), evidence detail is NOT emitted in the output."""
     ev = Evidence(kind="pr", ref="PR#1", url="", detail="fixed auth bug in login flow")
     p = Portfolio(
         subject="alice",
@@ -144,6 +169,18 @@ def test_evidence_detail_rendered_when_present():
         claims=[Claim(text="Something", evidence_refs=["PR#1"], confidence=0.7)],
     )
     out = render_markdown(p)
+    assert "fixed auth bug in login flow" not in out
+
+
+def test_evidence_detail_rendered_when_present_with_show_refs():
+    """With show_refs=True, evidence detail text appears in the output when non-empty."""
+    ev = Evidence(kind="pr", ref="PR#1", url="", detail="fixed auth bug in login flow")
+    p = Portfolio(
+        subject="alice",
+        evidence=[ev],
+        claims=[Claim(text="Something", evidence_refs=["PR#1"], confidence=0.7)],
+    )
+    out = render_markdown(p, show_refs=True)
     assert "fixed auth bug in login flow" in out
 
 
@@ -230,7 +267,22 @@ def test_escape_hostile_evidence_ref():
 
 
 def test_escape_hostile_evidence_url():
-    """Hostile characters in evidence url are escaped in the output."""
+    """Hostile characters in evidence url are escaped in the output (with show_refs=True)."""
+    hostile_url = "https://example.com/path[evil]?x=1"
+    ev = Evidence(kind="pr", ref="PR#1", url=hostile_url)
+    p = Portfolio(
+        subject="alice",
+        evidence=[ev],
+        claims=[Claim(text="Something", evidence_refs=["PR#1"], confidence=0.7)],
+    )
+    out = render_markdown(p, show_refs=True)
+    # The hostile [evil] brackets must not appear unescaped.
+    assert "[evil]" not in out
+    assert "\\[evil\\]" in out
+
+
+def test_escape_hostile_evidence_url_hidden_by_default():
+    """By default (show_refs=False), hostile url is not emitted at all."""
     hostile_url = "https://example.com/path[evil]?x=1"
     ev = Evidence(kind="pr", ref="PR#1", url=hostile_url)
     p = Portfolio(
@@ -239,9 +291,8 @@ def test_escape_hostile_evidence_url():
         claims=[Claim(text="Something", evidence_refs=["PR#1"], confidence=0.7)],
     )
     out = render_markdown(p)
-    # The hostile [evil] brackets must not appear unescaped.
     assert "[evil]" not in out
-    assert "\\[evil\\]" in out
+    assert "https://example.com" not in out
 
 
 def test_escape_hostile_evidence_detail():
@@ -369,8 +420,8 @@ def test_render_order_without_synthesis_uses_fallback_headline():
 # ---------------------------------------------------------------------------
 
 
-def test_highlight_bullet_single_ref_format():
-    """Highlight with one ref renders as '- <text> (refs: <ref>)'.
+def test_highlight_bullet_refs_hidden_by_default():
+    """By default (show_refs=False), highlight bullets do NOT include '(refs: …)'.
 
     Outcome: 'the literal substring (refs: appears on every rendered highlight line.'
     """
@@ -381,12 +432,28 @@ def test_highlight_bullet_single_ref_format():
         highlights=[HighlightBullet(text="Did something", evidence_refs=["PR#1"])],
     )
     out = render_markdown(p, synthesis=syn)
+    assert "(refs: " not in out
+    assert "- Did something" in out
+
+
+def test_highlight_bullet_single_ref_format_with_show_refs():
+    """With show_refs=True, highlight with one ref renders as '- <text> (refs: <ref>)'.
+
+    Outcome: 'the literal substring (refs: appears on every rendered highlight line.'
+    """
+    p = _make_full_portfolio()
+    syn = SynthesisResult(
+        headline="Summary",
+        headline_refs=["PR#1"],
+        highlights=[HighlightBullet(text="Did something", evidence_refs=["PR#1"])],
+    )
+    out = render_markdown(p, synthesis=syn, show_refs=True)
     assert "- Did something (refs: PR" in out
     assert "(refs: " in out
 
 
 def test_highlight_bullet_multi_ref_format():
-    """Highlight with two refs renders with comma-space separator.
+    """With show_refs=True, highlight with two refs renders with comma-space separator.
 
     Outcome: 'one citing two refs ... comma-space separator.'
     """
@@ -403,7 +470,7 @@ def test_highlight_bullet_multi_ref_format():
         headline_refs=["PR#1"],
         highlights=[HighlightBullet(text="Multi ref bullet", evidence_refs=["PR#1", "app/main.py"])],
     )
-    out = render_markdown(p, synthesis=syn)
+    out = render_markdown(p, synthesis=syn, show_refs=True)
     # Both refs must appear in the bullet line separated by ", "
     bullet_lines = [ln for ln in out.splitlines() if "(refs: " in ln]
     assert len(bullet_lines) == 1
@@ -761,7 +828,7 @@ def test_empty_portfolio_no_headline_or_stats():
 
 
 def test_per_claim_detail_preserved_with_url():
-    """Claim block still emits ref, url, and detail under the new grouped layout.
+    """With show_refs=True, claim block emits ref, url, and detail under the grouped layout.
 
     Outcome: 'render test that re-uses today's per-claim assertions on the new grouped layout.'
     """
@@ -771,10 +838,28 @@ def test_per_claim_detail_preserved_with_url():
         evidence=[ev],
         claims=[Claim(text="Fixed bug in auth", evidence_refs=["PR#1"], confidence=0.85)],
     )
-    out = render_markdown(p)
+    out = render_markdown(p, show_refs=True)
     assert "Fixed bug in auth" in out
     assert "0.85" in out
     assert "PR" in out and "1" in out
     assert "https://github.com/o/r/pull/1" in out
     assert "Fixed the bug" in out
     assert "---" in out
+
+
+def test_per_claim_ref_and_url_hidden_by_default():
+    """By default (show_refs=False), claim block does NOT emit the Evidence block (ref/url/detail)."""
+    ev = Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Fixed the bug")
+    p = Portfolio(
+        subject="alice",
+        evidence=[ev],
+        claims=[Claim(text="Fixed bug in auth", evidence_refs=["PR#1"], confidence=0.85)],
+    )
+    out = render_markdown(p)
+    # claim text and confidence still present
+    assert "Fixed bug in auth" in out
+    assert "0.85" in out
+    # Evidence block absent
+    assert "https://github.com/o/r/pull/1" not in out
+    assert "Fixed the bug" not in out
+    assert "Evidence:" not in out

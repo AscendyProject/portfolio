@@ -44,6 +44,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mask-private", action="store_true", default=False, help="anonymize private GitHub repo names in output"
     )
+    parser.add_argument(
+        "--show-refs", action="store_true", default=False, help="include grounding refs in rendered output"
+    )
     return parser
 
 
@@ -134,7 +137,7 @@ def run(
         ]
         grade_result = _GradeResult(score=grade_result.score, reasoning=scrubbed_reasoning)
 
-    markdown = render_fit(score_result, grade_result)
+    markdown = render_fit(score_result, grade_result, show_refs=args.show_refs)
 
     # Grounding summary → stderr only
     grounding = result.grounding

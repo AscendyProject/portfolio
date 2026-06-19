@@ -114,8 +114,8 @@ def test_main_module_structure():
 # ---------------------------------------------------------------------------
 
 
-def test_end_to_end_salutation_author_paragraph_refs(capsys):
-    """'End-to-end pytest run produces stdout with salutation, --author, grounded paragraph, cited refs'."""
+def test_end_to_end_salutation_author_paragraph_no_refs_by_default(capsys):
+    """'End-to-end pytest run produces stdout with salutation, --author, grounded paragraph; no refs by default.'"""
     runner = _make_counter_runner(_NARRATE_ONE, _LETTER_ONE)
     code = run(_base_argv(), extractor=_fake_extractor, runner=runner)
     out = capsys.readouterr().out
@@ -123,8 +123,20 @@ def test_end_to_end_salutation_author_paragraph_refs(capsys):
     assert "Dear Hiring Manager" in out  # salutation
     assert "alice" in out  # --author in heading
     assert "excellent contribution" in out  # grounded paragraph text
-    # Evidence ref appears in output (escaped form: PR\#1 or at least "PR")
+    # By default (show_refs=False), evidence refs must NOT appear in the letter body
+    assert "*[" not in out
+
+
+def test_end_to_end_refs_visible_with_show_refs(capsys):
+    """'With --show-refs, evidence refs appear in the letter body.'"""
+    runner = _make_counter_runner(_NARRATE_ONE, _LETTER_ONE)
+    code = run(_base_argv() + ["--show-refs"], extractor=_fake_extractor, runner=runner)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Dear Hiring Manager" in out
+    # Evidence ref appears in output with --show-refs (escaped form PR\#1 or at least PR)
     assert "PR" in out
+    assert "*[" in out
 
 
 # ---------------------------------------------------------------------------

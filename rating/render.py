@@ -26,6 +26,8 @@ def render_rating(
     portfolio: Portfolio,
     profile_result: ProfileResult,
     grade_result: GradeResult,
+    *,
+    show_refs: bool = False,
 ) -> str:
     """Render a grounded capability rating scorecard to Markdown.
 
@@ -56,7 +58,7 @@ def render_rating(
         heading = dim_name.replace("_", " ").title()
         lines.append(f"### {_escape(heading)}")
         lines.append(f"- Value: {dim.value}  Band: {dim.band}  Points: {dim.points}")
-        if dim.evidence_refs:
+        if show_refs and dim.evidence_refs:
             refs_str = ", ".join(_escape(r) for r in dim.evidence_refs)
             lines.append(f"- Evidence refs: {refs_str}")
         lines.append("")
@@ -67,7 +69,7 @@ def render_rating(
     for bullet in grade_result.reasoning:
         text = _escape(bullet["text"])
         refs = bullet.get("evidence_refs", [])
-        if refs:
+        if show_refs and refs:
             refs_str = ", ".join(_escape(r) for r in refs)
             lines.append(f"- {text} _(refs: {refs_str})_")
         else:

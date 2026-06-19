@@ -34,6 +34,9 @@ Arguments (may be empty): `$ARGUMENTS`
    - optionally **--mask-private** to anonymize private GitHub repo names in the output
      before sharing. Detected from structured fields only; semantic project names are
      NOT masked. A `masked N private repo(s)` summary is printed to stderr.
+   - optionally **--show-refs** to include grounding evidence refs in the rendered
+     Markdown scorecard. By default refs are hidden (grounding still runs; only display
+     is suppressed). The stderr grounding summary is unaffected by this flag.
 
 2. **Run the CLI** with exactly those values (pass each as a separate argument —
    never assemble a shell string from the user's input, never use command

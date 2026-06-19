@@ -12,7 +12,7 @@ from reference_check.letter import LetterDraft
 _INSUFFICIENT_NOTICE = "_insufficient grounded evidence — letter not generated_"
 
 
-def render_letter(draft: LetterDraft) -> str:
+def render_letter(draft: LetterDraft, *, show_refs: bool = False) -> str:
     """Render a LetterDraft to a Markdown string.
 
     Output structure:
@@ -46,7 +46,7 @@ def render_letter(draft: LetterDraft) -> str:
 
     for para in draft.paragraphs:
         lines.append(_escape(para.text))
-        if para.evidence_refs:
+        if show_refs and para.evidence_refs:
             refs_str = ", ".join(_escape(ref) for ref in para.evidence_refs)
             lines.append(f"*[{refs_str}]*")
         lines.append("")

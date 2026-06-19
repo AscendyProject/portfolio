@@ -37,6 +37,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mask-private", action="store_true", default=False, help="anonymize private GitHub repo names in output"
     )
+    parser.add_argument(
+        "--show-refs", action="store_true", default=False, help="include grounding refs in rendered output"
+    )
     return parser
 
 
@@ -117,7 +120,7 @@ def run(
             rejected_paragraphs=draft.rejected_paragraphs,
         )
 
-    markdown = render_letter(draft)
+    markdown = render_letter(draft, show_refs=args.show_refs)
 
     # Grounding summary on stderr only.
     grounding = result.grounding

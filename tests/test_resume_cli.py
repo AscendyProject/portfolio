@@ -356,7 +356,7 @@ def test_evidence_ref_markdown_injection_escaped(tmp_path, capsys):
         return json.dumps([{"text": "Built a python thing", "evidence_refs": [injected_ref], "confidence": 0.9}])
 
     code = run(
-        _base_argv(jd_path),
+        _base_argv(jd_path) + ["--show-refs"],
         extractor=extractor_with_tricky_ref,
         runner=runner_citing_tricky_ref,
     )

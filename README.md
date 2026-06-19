@@ -238,6 +238,26 @@ source-file extension (e.g. `app/auth.py`) is treated as a path, not a repo, and
 discovered. Trade-off: a real repository literally named `*.py` / `*.js` / etc. would be
 skipped — vanishingly rare in practice.
 
+### `--show-refs` — reveal grounding refs in rendered output
+
+By default, all five CLIs hide grounding evidence refs from the rendered Markdown document.
+The internal grounding pipeline runs unchanged — every claim is still traced to real evidence
+before render — but the rendered document shows only claim text (and confidence for portfolio).
+Pass `--show-refs` to restore the full reference display (Evidence blocks, inline `[refs]`,
+`*(refs)*` citation lines, etc.):
+
+```bash
+python -m portfolio     --source-type github --source <url> --author <handle> --show-refs
+python -m resume        --source-type github --source <url> --author <handle> --jd jd.txt --show-refs
+python -m fit           --source-type github --source <url> --author <handle> --jd jd.txt --show-refs
+python -m rating        --source-type github --source <url> --author <handle> --show-refs
+python -m reference_check --source-type github --source <url> --author <handle> --show-refs
+```
+
+The stderr `grounded: N  rejected: N  needs-confirmation: N` summary is emitted on every run
+regardless of `--show-refs`. The two flags compose: `--show-refs --mask-private` shows refs in
+their anonymized `private-repo-N` form.
+
 ## Dev
 
 ```bash
