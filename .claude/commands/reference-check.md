@@ -1,6 +1,6 @@
 ---
 description: Generate a grounded recommendation letter from a GitHub repo or a blog/article URL (runs python -m reference_check).
-argument-hint: "[github <repo-url> <author>] | [web <article-url> <author>] [--out <file>]"
+argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] [--mask-private] [--out <file>]"
 ---
 
 The user wants to generate a **grounded** recommendation letter — every paragraph

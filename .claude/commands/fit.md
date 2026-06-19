@@ -1,6 +1,6 @@
 ---
 description: Assess how well a developer's grounded portfolio matches a job description (runs python -m fit).
-argument-hint: "[github <repo-url> <author> <jd-path>] | [web <article-url> <author> <jd-path>] [--out <file>]"
+argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] --jd <path-or-url> [--mask-private] [--out <file>]"
 ---
 
 The user wants a **grounded JD fit assessment** — a deterministic grade (S/A/B/C/D)

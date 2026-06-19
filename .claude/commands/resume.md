@@ -1,6 +1,6 @@
 ---
 description: Generate a grounded resume from a GitHub repo or a blog/article URL and a job description (runs python -m resume).
-argument-hint: "[github <repo-url> <author> <jd-path>] | [web <article-url> <author> <jd-path>] [--top-n N] [--out <file>]"
+argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] --jd <path-or-url> [--top-n N] [--mask-private] [--out <file>]"
 ---
 
 The user wants to generate a **grounded** resume — every bullet traced to real
