@@ -903,6 +903,31 @@ def test_portfolio_source_type_masking(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
+def test_parse_ref_rejects_pathlike_with_pr_or_file_suffix():
+    """`app/auth.py#5` and `app/auth.py:42` must NOT be discovered as the repo
+    `app/auth.py` — a file path with a #n or :path suffix is still a path, not a
+    canonical repository ref (codex review: ambiguous-form false positives)."""
+    from portfolio.mask import _parse_ref
+
+    assert _parse_ref("app/auth.py#5") is None
+    assert _parse_ref("app/auth.py:42") is None
+    assert _parse_ref("src/main.go#1") is None
+    assert _parse_ref("lib/util.ts:src/x") is None
+    # genuine repo refs still parse
+    assert _parse_ref("acme/svc#5") == "acme/svc"
+    assert _parse_ref("acme/svc:src/auth.py") == "acme/svc"
+
+
+def test_extract_pathlike_pr_ref_yields_no_candidate():
+    """A Portfolio whose ref is a path-with-suffix yields no repo candidate."""
+    p = Portfolio(
+        subject="x",
+        evidence=[Evidence(kind="file", ref="app/auth.py:42")],
+        claims=[Claim(text="t", evidence_refs=["app/auth.py:42"], confidence=0.9, grounded=True)],
+    )
+    assert extract_repo_names(p) == set()
+
+
 def test_mask_overlapping_repo_names_no_partial_corruption():
     """`org/repo` and `org/repo-tools` both private: mask_portfolio rewrites
     longest-first, so `org/repo-tools` is never partially masked to

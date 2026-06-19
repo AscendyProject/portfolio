@@ -20,6 +20,44 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _PR_REF_RE = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$")
 # Matches owner/repo:<non-empty-path>
 _FILE_REF_RE = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+):(.+)$")
+# A second segment ending in a common source-file extension is almost certainly a
+# file path mistaken for a repo (e.g. `app/auth.py` in `app/auth.py#5` /
+# `app/auth.py:42`), not a real repository name. We reject these so a bare path is
+# never discovered as a repo. Trade-off: a real repo literally named `*.py` etc.
+# would be skipped — vanishingly rare; noted as a limitation in the README.
+_PATH_LIKE_EXTENSIONS = (
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".go",
+    ".rs",
+    ".java",
+    ".rb",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".cs",
+    ".php",
+    ".swift",
+    ".kt",
+    ".scala",
+    ".sh",
+    ".md",
+    ".txt",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".cfg",
+    ".ini",
+    ".html",
+    ".css",
+    ".sql",
+)
 
 _GITHUB_HOST = "github.com"
 
@@ -34,6 +72,8 @@ def _is_valid_owner_repo(candidate: str) -> bool:
         return False
     if owner in (".", "..") or repo in (".", ".."):
         return False
+    if repo.lower().endswith(_PATH_LIKE_EXTENSIONS):
+        return False  # `auth.py` etc. — a path mistaken for a repo, not a repo
     return True
 
 
