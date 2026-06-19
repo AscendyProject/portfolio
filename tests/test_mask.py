@@ -896,3 +896,104 @@ def test_portfolio_source_type_masking(tmp_path, capsys):
     assert code == 0
     assert "acme/svc" not in captured.out
     assert "masked 1 private repo(s)" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# IR-002 / IR-004: overlapping repo names + downstream adversarial scrub
+# ---------------------------------------------------------------------------
+
+
+def test_mask_overlapping_repo_names_no_partial_corruption():
+    """`org/repo` and `org/repo-tools` both private: mask_portfolio rewrites
+    longest-first, so `org/repo-tools` is never partially masked to
+    `private-repo-N-tools` (IR-002, portfolio substitution)."""
+    p = Portfolio(
+        subject="x",
+        evidence=[Evidence(kind="pr", ref="org/repo#1"), Evidence(kind="pr", ref="org/repo-tools#2")],
+        claims=[
+            Claim(
+                text="shipped org/repo and org/repo-tools",
+                evidence_refs=["org/repo#1", "org/repo-tools#2"],
+                confidence=0.9,
+                grounded=True,
+            )
+        ],
+    )
+    masked = mask_portfolio(p, {"org/repo", "org/repo-tools"})
+    txt = masked.claims[0].text
+    assert "org/repo" not in txt
+    assert "-tools" not in txt, "partial-mask corruption (private-repo-N-tools)"
+    refs = {e.ref for e in masked.evidence}
+    assert all("org/" not in r for r in refs)
+    assert len({r.split("#")[0] for r in refs}) == 2  # two distinct labels
+
+
+def test_post_synthesis_scrub_overlap():
+    """A synthesis runner that emits `org/repo-tools` (both repos private) is
+    scrubbed longest-first, not corrupted to `private-repo-N-tools` (IR-002,
+    post-synthesis scrubbing)."""
+    from portfolio.pipeline import resolve_and_optionally_mask
+    from portfolio.sources import ResolvedSource
+
+    def fake_extract():
+        return [Evidence(kind="pr", ref="org/repo#1"), Evidence(kind="pr", ref="org/repo-tools#2")]
+
+    resolved = ResolvedSource(subject="x", extract=fake_extract)
+
+    def fake_runner(prompt: str) -> str:
+        return json.dumps(
+            [
+                {
+                    "text": "Built org/repo and org/repo-tools",
+                    "evidence_refs": ["org/repo#1", "org/repo-tools#2"],
+                    "confidence": 0.9,
+                }
+            ]
+        )
+
+    def fake_synthesis_runner(prompt: str) -> str:
+        return json.dumps(
+            {"headline": "worked on org/repo-tools heavily", "headline_refs": ["private-repo-1#1"], "highlights": []}
+        )
+
+    result, n_masked = resolve_and_optionally_mask(
+        resolved,
+        subject="x",
+        runner=fake_runner,
+        mask_private=True,
+        synthesis_runner=fake_synthesis_runner,
+        visibility_lookup=_private_lookup,
+    )
+    assert n_masked == 2
+    hl = result.synthesis.headline or ""
+    assert "org/repo" not in hl
+    assert "-tools" not in hl, "partial-mask corruption in post-synthesis scrub"
+
+
+def test_reference_check_downstream_letter_scrub_adversarial(tmp_path, capsys):
+    """reference_check --mask-private: the letter runner leaks the private repo
+    name in PROSE while citing a valid masked ref; the post-model scrub removes
+    it from the rendered letter (IR-004 downstream adversarial)."""
+    from reference_check.cli import run
+    from portfolio.store import portfolio_to_json
+
+    p = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="acme/svc#1", url="https://github.com/acme/svc/pull/1", detail="x")],
+        claims=[Claim(text="Built a feature", evidence_refs=["acme/svc#1"], confidence=0.9, grounded=True)],
+    )
+    pf = tmp_path / "p.json"
+    pf.write_text(portfolio_to_json(p), encoding="utf-8")
+
+    def leaky_letter_runner(prompt: str) -> str:
+        # Cites the valid masked ref but leaks the real private name in prose.
+        return json.dumps([{"text": "alice shipped acme/svc end to end", "evidence_refs": ["private-repo-1#1"]}])
+
+    code = run(
+        ["--source-type", "portfolio", "--source", str(pf), "--mask-private"],
+        runner=leaky_letter_runner,
+        visibility_lookup=_private_lookup,
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "acme/svc" not in out, "private name leaked through the letter prose (scrub missing)"

@@ -125,6 +125,7 @@ def resolve_and_optionally_mask(
     from .mask import (
         _build_relabel_map,
         _gh_visibility_lookup,
+        _rewrite_text,
         extract_repo_names,
         mask_portfolio,
         private_repos,
@@ -140,37 +141,21 @@ def resolve_and_optionally_mask(
     synthesis: SynthesisResult | None = None
     if synthesis_runner is not None and masked_portfolio.claims:
         raw_synthesis = synthesize(masked_portfolio, synthesis_runner)
-        # Post-synthesis scrub: replace private owner/repo in text fields
+        # Post-synthesis scrub: replace any private owner/repo the model emitted in
+        # text/refs, using the collision-safe (longest-first) rewrite so `org/repo`
+        # never partially masks `org/repo-tools` (IR-002).
         if relabel and raw_synthesis is not None:
-            # Scrub headline
-            new_headline = raw_synthesis.headline
-            if new_headline is not None:
-                for repo, label in relabel.items():
-                    new_headline = new_headline.replace(repo, label)
-            # Scrub headline_refs
-            new_headline_refs = (
-                [
-                    ref.replace(repo, label)
-                    for ref in raw_synthesis.headline_refs
-                    for repo, label in [(repo, relabel[repo]) for repo in relabel]
-                ]
-                if raw_synthesis.headline_refs
-                else []
+            new_headline = (
+                _rewrite_text(raw_synthesis.headline, relabel) if raw_synthesis.headline is not None else None
             )
-            # Rebuild headline_refs properly (multiple repos)
-            new_headline_refs = list(raw_synthesis.headline_refs)
-            for repo, label in relabel.items():
-                new_headline_refs = [r.replace(repo, label) for r in new_headline_refs]
-            # Scrub highlights
-            new_highlights = []
-            for hl in raw_synthesis.highlights:
-                scrubbed_text = hl.text
-                for repo, label in relabel.items():
-                    scrubbed_text = scrubbed_text.replace(repo, label)
-                scrubbed_refs = list(hl.evidence_refs)
-                for repo, label in relabel.items():
-                    scrubbed_refs = [r.replace(repo, label) for r in scrubbed_refs]
-                new_highlights.append(HighlightBullet(text=scrubbed_text, evidence_refs=scrubbed_refs))
+            new_headline_refs = [_rewrite_text(r, relabel) for r in raw_synthesis.headline_refs]
+            new_highlights = [
+                HighlightBullet(
+                    text=_rewrite_text(hl.text, relabel),
+                    evidence_refs=[_rewrite_text(r, relabel) for r in hl.evidence_refs],
+                )
+                for hl in raw_synthesis.highlights
+            ]
             synthesis = SynthesisResult(
                 headline=new_headline,
                 headline_refs=new_headline_refs,
