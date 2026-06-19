@@ -14,13 +14,17 @@ Arguments (may be empty): `$ARGUMENTS`
 ## Steps
 
 1. **Gather the inputs** from `$ARGUMENTS`; ask the user for anything missing:
-   - **source type** — one of `github` or `web`. If unclear, ask:
+   - **source type** — one of `github`, `web`, `github-author`, or `portfolio`. If unclear, ask:
      - `github` → a GitHub repository, evidence is the author's merged PRs (via `gh`).
      - `web` → a blog/article URL, evidence is the fetched article.
-   - **source URL** — `https://github.com/<owner>/<repo>` for github, or the
-     article URL for web.
-   - **author** — the GitHub handle of the developer being recommended (github),
-     or the subject the letter is for (web).
+     - `github-author` → merged PRs across all repos the `gh` token can see.
+     - `portfolio` → reuse a previously saved grounded portfolio JSON (no extraction,
+       no LLM narration for the portfolio step; letter composition still uses the model).
+       `--source` must be the path to the saved `.json` file.
+   - **source URL** — `https://github.com/<owner>/<repo>` for github, the article URL
+     for web, or the path to a `.json` file for portfolio.
+   - **author** — the GitHub handle of the developer being recommended (github /
+     github-author), or the subject the letter is for (web). Not used for `portfolio`.
    - optionally **--out <file>** if the user wants the Markdown written to a file
      instead of shown inline.
 

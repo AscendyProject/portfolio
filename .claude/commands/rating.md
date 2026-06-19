@@ -17,16 +17,18 @@ Arguments (may be empty): `$ARGUMENTS`
 ## Steps
 
 1. **Gather the inputs** from `$ARGUMENTS`; ask the user for anything missing:
-   - **source type** — one of `github`, `web`, or `github-author`. If unclear, ask:
+   - **source type** — one of `github`, `web`, `github-author`, or `portfolio`. If unclear, ask:
      - `github` → a GitHub repository, evidence is the author's merged PRs (via `gh`).
      - `web` → a blog/article URL, evidence is the fetched article.
      - `github-author` → author-wide: merged PRs across **all** repos the `gh` token
        can see. Only `--author` is required; `--source` is not used.
        > **Note:** output may include private repo names. Redact before sharing.
-   - **source URL** — `https://github.com/<owner>/<repo>` for github, or the article URL for web.
-     Not required for `github-author`.
+     - `portfolio` → reuse a previously saved grounded portfolio JSON (no extraction,
+       no LLM narration). `--source` must be the path to the saved `.json` file.
+   - **source URL** — `https://github.com/<owner>/<repo>` for github, the article URL for web,
+     or the path to a `.json` file for portfolio. Not required for `github-author`.
    - **author** — the GitHub handle (github / github-author) or subject name (web) the
-     assessment is for.
+     assessment is for. Not used for `portfolio`.
    - optionally **--out <file>** if the user wants the Markdown written to a file instead of
      shown inline.
 

@@ -13,19 +13,24 @@ Arguments (may be empty): `$ARGUMENTS`
 ## Steps
 
 1. **Gather the inputs** from `$ARGUMENTS`; ask the user for anything missing:
-   - **source type** — one of `github`, `web`, or `github-author`. If it's unclear,
+   - **source type** — one of `github`, `web`, `github-author`, or `portfolio`. If it's unclear,
      ask the user to choose:
      - `github` → a GitHub repository, evidence is the author's merged PRs (via `gh`).
      - `web` → a blog/article URL, evidence is the fetched article.
      - `github-author` → author-wide: merged PRs across **all** repos the `gh` token
        can see. Only `--author` is required; `--source` is not used.
        > **Note:** output may include private repo names. Redact before sharing.
+     - `portfolio` → re-render a previously saved grounded portfolio JSON file (no `gh`
+       extraction, no LLM narration). `--source` must be the path to the saved `.json`
+       file; `--author` is accepted but ignored (the file's subject wins).
    - **source URL** — `https://github.com/<owner>/<repo>` for github, or the
-     article URL for web. Not required for `github-author`.
+     article URL for web. Not required for `github-author`. Path to `.json` for `portfolio`.
    - **author** — the GitHub handle whose merged PRs are the evidence (github /
-     github-author), or the subject the portfolio is for (web).
+     github-author), or the subject the portfolio is for (web). Not used for `portfolio`.
    - optionally **--out <file>** if the user wants the Markdown written to a file
      instead of shown inline.
+   - optionally **--emit-portfolio <file>** to save the grounded Portfolio as a JSON
+     file that can later be reused with `--source-type portfolio`.
 
 2. **Run the CLI** with exactly those values (pass each as a separate argument —
    never assemble a shell string from the user's input):
@@ -34,8 +39,9 @@ Arguments (may be empty): `$ARGUMENTS`
    python -m portfolio --source-type <type> --source <url> --author <author>
    ```
 
-   Add `--out <file>` only if the user asked to save to a file. Use `python`
-   (not `python3`) on this host.
+   Add `--out <file>` only if the user asked to save to a file.
+   Add `--emit-portfolio <file>` only if the user asked to save the Portfolio JSON.
+   Use `python` (not `python3`) on this host.
 
 3. **On a non-zero exit**, show the CLI's stderr message and help the user fix the
    input — e.g. an invalid/unsupported `--source` URL, or an unknown

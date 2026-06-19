@@ -159,6 +159,32 @@ All five commands accept `--source-type` to select the evidence source:
 | `github` | GitHub repo URL (required) | handle (required) | merged PRs in one repo |
 | `web` | article URL (required) | name (required) | fetched article |
 | `github-author` | _(not used)_ | handle (required) | merged PRs across **all** repos the `gh` token can see |
+| `portfolio` | path to a saved `.json` file (required) | _(ignored; subject from file)_ | re-uses a previously saved grounded portfolio |
+
+### Save-then-reuse two-step
+
+Run `python -m portfolio` once with `--emit-portfolio <file>` to save the grounded
+Portfolio as a JSON file. Then pass that file to any of the five CLIs via
+`--source-type portfolio --source <file>` to skip extraction and LLM narration
+entirely — only the downstream step (resume selection, fit scoring, etc.) runs.
+
+```bash
+# Step 1: build and save
+python -m portfolio --source-type github \
+  --source https://github.com/<owner>/<repo> --author <handle> \
+  --emit-portfolio portfolio.json
+
+# Step 2: reuse across CLIs (no gh, no LLM narration call)
+python -m portfolio  --source-type portfolio --source portfolio.json
+python -m resume     --source-type portfolio --source portfolio.json --jd jd.txt
+python -m fit        --source-type portfolio --source portfolio.json --jd jd.txt
+python -m rating     --source-type portfolio --source portfolio.json
+python -m reference_check --source-type portfolio --source portfolio.json
+```
+
+The grounding gate is re-applied on load: any claim whose cited evidence ref is
+absent from the saved evidence list is dropped. `--author` is accepted but ignored
+for `--source-type portfolio`; the subject stored in the JSON file always wins.
 
 ### `github-author` — author-wide evidence
 
