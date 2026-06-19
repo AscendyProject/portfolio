@@ -1,0 +1,4 @@
+# redteam run artifacts not meant for a PR (#49). The operator progress
+# mirror is an operational surface, not part of the audit trail, and
+# pr-author stages the whole task dir.
+**/progress.md
