@@ -1,6 +1,6 @@
 ---
 description: Generate a grounded portfolio from a GitHub repo or a blog/article URL (runs python -m portfolio).
-argument-hint: "[github <repo-url> <author>] | [web <article-url> <author>] [--out <file>]"
+argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] [--mask-private] [--out <file>]"
 ---
 
 The user wants to generate a **grounded** portfolio — every claim traced to real

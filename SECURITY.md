@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-`portfolio` is early-stage (`0.0.x`). Only the latest `main` is supported;
-fixes land on `main`, not on older tags.
+`portfolio` is early-stage (`0.x`). Only the latest release (currently **v0.2.0**)
+and `main` are supported; fixes land on `main`, not on older tags.
 
 ## Reporting a vulnerability
 

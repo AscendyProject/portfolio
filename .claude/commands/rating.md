@@ -1,6 +1,6 @@
 ---
 description: Assess a developer's capability with a grounded grade and rubric score from their real work. Does NOT produce an absolute percentile or comparison to any population.
-argument-hint: "[github <repo-url> <author>] | [web <article-url> <author>] [--out <file>]"
+argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] [--mask-private] [--out <file>]"
 ---
 
 The user wants a **grounded capability assessment** — a deterministic grade (S/A/B/C/D)

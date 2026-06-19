@@ -3,7 +3,7 @@
 Turn a developer's real GitHub work into a **grounded** portfolio — every claim
 traced to evidence, never invented.
 
-> Part of the Ascendy harness catalog (`/portfolio`). Status: early (`0.0.x`).
+> Part of the Ascendy harness catalog. Status: **v0.2.0** — five grounded commands (`/portfolio` · `/resume` · `/reference-check` · `/fit` · `/rating`). See [CHANGELOG](CHANGELOG.md).
 
 ## Quickstart
 
