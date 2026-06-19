@@ -21,7 +21,7 @@ from pathlib import Path
 from portfolio.extract import extract_merged_prs
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
-from portfolio.pipeline import resolve_to_build_result
+from portfolio.pipeline import resolve_and_optionally_mask, resolve_to_build_result
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
 from rating.grade import grade
@@ -57,6 +57,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source", help="source URL (a GitHub repo URL, or an article URL for --source-type web)")
     parser.add_argument("--author", help="GitHub handle whose merged PRs are the evidence")
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
+    parser.add_argument("--mask-private", action="store_true", default=False,
+                        help="anonymize private GitHub repo names in output")
     return parser
 
 
@@ -67,6 +69,7 @@ def run(
     runner=run_claude,
     fetcher=fetch_html,
     grader_runner=_default_grader_runner,
+    visibility_lookup=None,
 ) -> int:
     """Execute the CLI. Returns a process exit code (0 = success).
 
@@ -91,10 +94,20 @@ def run(
 
     # Extract evidence + build grounded portfolio.
     try:
-        result = resolve_to_build_result(resolved, subject=resolved.subject, runner=runner)
+        result, n_masked = resolve_and_optionally_mask(
+            resolved,
+            subject=resolved.subject,
+            runner=runner,
+            mask_private=args.mask_private,
+            synthesis_runner=None,
+            visibility_lookup=visibility_lookup,
+        )
     except Exception as exc:
         print(f"failed to build portfolio: {exc}", file=sys.stderr)
         return 1
+
+    if args.mask_private:
+        print(f"masked {n_masked} private repo(s)", file=sys.stderr)
 
     # Deterministic profiling (pure, no model call).
     profile_result = profile(result.portfolio)
