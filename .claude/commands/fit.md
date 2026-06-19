@@ -15,13 +15,16 @@ Arguments (may be empty): `$ARGUMENTS`
 ## Steps
 
 1. **Gather the inputs** from `$ARGUMENTS`; ask the user for anything missing:
-   - **source type** — one of `github` or `web`. If unclear, ask:
+   - **source type** — one of `github`, `web`, `github-author`, or `portfolio`. If unclear, ask:
      - `github` → a GitHub repository, evidence is the author's merged PRs (via `gh`).
      - `web` → a blog/article URL, evidence is the fetched article.
-   - **source URL** — `https://github.com/<owner>/<repo>` for github, or the
-     article URL for web.
-   - **author** — the GitHub handle whose merged PRs are the evidence (github),
-     or the subject the assessment is for (web).
+     - `github-author` → merged PRs across all repos the `gh` token can see.
+     - `portfolio` → reuse a previously saved grounded portfolio JSON (no extraction,
+       no LLM narration). `--source` must be the path to the saved `.json` file.
+   - **source URL** — `https://github.com/<owner>/<repo>` for github, the article URL
+     for web, or the path to a `.json` file for portfolio.
+   - **author** — the GitHub handle whose merged PRs are the evidence (github /
+     github-author), or the subject the assessment is for (web). Not used for `portfolio`.
    - **jd path or URL** — filesystem path to a plain-text job description file, or an `http(s)` URL to a job posting page (required). When a URL is supplied the page is fetched and its article text is used as the JD.
    - optionally **--out <file>** if the user wants the Markdown written to a file
      instead of shown inline.

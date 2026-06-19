@@ -21,7 +21,7 @@ from pathlib import Path
 from portfolio.extract import extract_merged_prs
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
-from portfolio.pipeline import build_from_evidence
+from portfolio.pipeline import resolve_to_build_result
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
 from rating.grade import grade
@@ -91,8 +91,7 @@ def run(
 
     # Extract evidence + build grounded portfolio.
     try:
-        evidence = resolved.extract()
-        result = build_from_evidence(subject=resolved.subject, evidence=evidence, runner=runner)
+        result = resolve_to_build_result(resolved, subject=resolved.subject, runner=runner)
     except Exception as exc:
         print(f"failed to build portfolio: {exc}", file=sys.stderr)
         return 1

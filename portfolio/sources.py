@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from portfolio.extract import extract_authored_prs, extract_merged_prs
-from portfolio.model import Evidence
+from portfolio.model import Evidence, Portfolio
 from portfolio.web import extract_article_evidence, fetch_html, parse_web_source
 
 _GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
@@ -58,6 +58,7 @@ class ResolvedSource:
 
     subject: str
     extract: Callable[[], list[Evidence]]
+    prebuilt: "Portfolio | None" = None
 
 
 def parse_github_source(url: str) -> str:
@@ -137,6 +138,29 @@ def _github_author_handler(request: SourceRequest) -> ResolvedSource:
     return ResolvedSource(subject=author, extract=lambda: author_extractor(author=author))
 
 
+def _portfolio_handler(request: SourceRequest) -> ResolvedSource:
+    """Resolve a portfolio JSON file source: validate path now, defer load to prebuilt."""
+    from pathlib import Path as _Path
+
+    from portfolio.store import PortfolioStoreError, portfolio_from_json
+
+    if not request.source:
+        raise ValueError("--source is required for --source-type portfolio")
+    path = _Path(request.source)
+    if not path.exists():
+        raise ValueError(f"portfolio file not found: {request.source!r}")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"cannot read portfolio file {request.source!r}: {exc}") from exc
+    try:
+        loaded = portfolio_from_json(text)
+    except PortfolioStoreError as exc:
+        raise ValueError(f"invalid portfolio JSON in {request.source!r}: {exc}") from exc
+    # prebuilt carries the loaded Portfolio; extract() is a no-op placeholder
+    return ResolvedSource(subject=loaded.subject, extract=lambda: [], prebuilt=loaded)
+
+
 # Source type -> handler. Register a handler here to add an *implemented* source;
 # it immediately becomes CLI-usable (see `known_source_types`) with no CLI change.
 SourceHandler = Callable[[SourceRequest], ResolvedSource]
@@ -144,6 +168,7 @@ _HANDLERS: dict[str, SourceHandler] = {
     "github": _github_handler,
     "web": _web_handler,
     "github-author": _github_author_handler,
+    "portfolio": _portfolio_handler,
 }
 
 # Recognized source types that are intentionally NOT implemented yet — reserved

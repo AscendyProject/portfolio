@@ -20,7 +20,7 @@ from pathlib import Path
 from portfolio.extract import extract_merged_prs
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
-from portfolio.pipeline import build_from_evidence
+from portfolio.pipeline import resolve_to_build_result
 from portfolio.render import render_markdown
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
@@ -36,6 +36,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--author", help="GitHub handle whose merged PRs are the evidence")
     parser.add_argument("--max-claims", type=int, default=12, help="max claims to draft (default: 12)")
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
+    parser.add_argument("--emit-portfolio", dest="emit_portfolio", help="write Portfolio JSON to this file")
     return parser
 
 
@@ -74,10 +75,9 @@ def run(
     # claude non-zero exit, malformed-but-valid gh JSON (wrong shape), etc. —
     # becomes a clean non-zero exit with a stderr message, not a traceback.
     try:
-        evidence = resolved.extract()
-        result = build_from_evidence(
+        result = resolve_to_build_result(
+            resolved,
             subject=resolved.subject,
-            evidence=evidence,
             runner=runner,
             max_claims=args.max_claims,
             synthesis_runner=synthesis_runner,
@@ -104,6 +104,16 @@ def run(
             return 1
     else:
         emit_markdown(markdown)
+
+    if args.emit_portfolio:
+        from portfolio.store import portfolio_to_json
+
+        try:
+            Path(args.emit_portfolio).write_text(portfolio_to_json(result.portfolio), encoding="utf-8")
+        except OSError as exc:
+            print(f"failed to write --emit-portfolio file {args.emit_portfolio!r}: {exc}", file=sys.stderr)
+            return 2
+
     return 0
 
 

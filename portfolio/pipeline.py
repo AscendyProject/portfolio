@@ -45,6 +45,41 @@ def build_from_evidence(
     return BuildResult(portfolio=portfolio, grounding=grounding, synthesis=synthesis)
 
 
+def resolve_to_build_result(
+    resolved,  # ResolvedSource — imported locally to avoid circular import
+    subject: str,
+    runner: Runner,
+    max_claims: int = 12,
+    *,
+    synthesis_runner: Runner | None = None,
+) -> BuildResult:
+    """Shared helper used by all five CLIs.
+
+    If the resolved source has a prebuilt Portfolio (the 'portfolio' source type),
+    re-apply the grounding gate and return a BuildResult directly — skipping
+    extraction and narration. Otherwise extract + narrate + ground as normal.
+    """
+    if getattr(resolved, "prebuilt", None) is not None:
+        grounding = check_claims(list(resolved.prebuilt.claims), resolved.prebuilt.evidence)
+        portfolio = Portfolio(
+            subject=resolved.prebuilt.subject,
+            evidence=resolved.prebuilt.evidence,
+            claims=grounding.grounded,
+        )
+        result_synthesis: SynthesisResult | None = None
+        if synthesis_runner is not None and portfolio.claims:
+            result_synthesis = synthesize(portfolio, synthesis_runner)
+        return BuildResult(portfolio=portfolio, grounding=grounding, synthesis=result_synthesis)
+    evidence = resolved.extract()
+    return build_from_evidence(
+        subject=subject,
+        evidence=evidence,
+        runner=runner,
+        max_claims=max_claims,
+        synthesis_runner=synthesis_runner,
+    )
+
+
 def build_portfolio(repo: str, author: str, runner: Runner = run_claude, max_claims: int = 12) -> BuildResult:
     """Full pipeline against a live repo: gh extract → model narrate → ground."""
     evidence = extract_merged_prs(repo=repo, author=author)
