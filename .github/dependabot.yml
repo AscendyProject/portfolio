@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # The packages have zero runtime pip dependencies (only the [dev] extras
+  # ruff + pytest), so the main thing worth watching is the GitHub Actions
+  # versions used by CI. Grouped into one PR/week to keep the noise low for a
+  # small project.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
