@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from portfolio.extract import extract_merged_prs
+from portfolio.jd_source import JDFetchError, JDFileReadError, JDInvalidURLError, load_jd
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
 from portfolio.pipeline import build_from_evidence
@@ -54,12 +55,17 @@ def run(
     """
     args = _build_parser().parse_args(argv)
 
-    # Read the JD file up front — fail early with a clean error if missing.
-    jd_path = Path(args.jd)
+    # Load the JD (file path or http(s) URL) — fail early with a clean error.
     try:
-        jd_text = jd_path.read_text(encoding="utf-8")
-    except OSError as exc:
+        jd_text = load_jd(args.jd, fetcher=fetcher)
+    except JDFileReadError as exc:
         print(f"cannot read --jd file {args.jd!r}: {exc}", file=sys.stderr)
+        return 2
+    except JDInvalidURLError as exc:
+        print(f"invalid --jd URL {args.jd!r}: {exc}", file=sys.stderr)
+        return 2
+    except JDFetchError as exc:
+        print(f"failed to fetch --jd URL {args.jd!r}: {exc}", file=sys.stderr)
         return 2
 
     # Resolve the source (validation/parse only — no extraction yet).
