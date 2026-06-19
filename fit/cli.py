@@ -23,7 +23,7 @@ from portfolio.extract import extract_merged_prs
 from portfolio.jd_source import JDFetchError, JDFileReadError, JDInvalidURLError, load_jd
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
-from portfolio.pipeline import resolve_to_build_result
+from portfolio.pipeline import resolve_and_optionally_mask
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
 
@@ -41,6 +41,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--author", help="GitHub handle or subject name")
     parser.add_argument("--jd", required=True, help="path to the job description file (plain text)")
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
+    parser.add_argument(
+        "--mask-private", action="store_true", default=False, help="anonymize private GitHub repo names in output"
+    )
     return parser
 
 
@@ -51,6 +54,7 @@ def run(
     runner=run_claude,
     fetcher=fetch_html,
     grader_runner: GraderRunner = default_grader_runner,
+    visibility_lookup=None,
 ) -> int:
     """Execute the /fit CLI. Returns a process exit code (0 = success).
 
@@ -91,16 +95,44 @@ def run(
 
     # Extract + build inside a top-level error boundary.
     try:
-        result = resolve_to_build_result(resolved, subject=resolved.subject, runner=runner)
+        result, n_masked = resolve_and_optionally_mask(
+            resolved,
+            subject=resolved.subject,
+            runner=runner,
+            mask_private=args.mask_private,
+            synthesis_runner=None,
+            visibility_lookup=visibility_lookup,
+        )
     except Exception as exc:
         print(f"failed to build portfolio: {exc}", file=sys.stderr)
         return 1
+
+    if args.mask_private:
+        print(f"masked {n_masked} private repo(s)", file=sys.stderr)
 
     # Deterministic grade
     score_result = score_fit(result.portfolio, jd_text)
 
     # Bounded agent grade (grader_runner called with temperature=0)
     grade_result = bounded_grade(result.portfolio, score_result.grade, score_result.band, grader_runner)
+
+    # Post-model scrub: replace any private owner/repo the grader emitted
+    if args.mask_private and result.relabel:
+        from fit.grade import GradeResult as _GradeResult
+
+        def _scrub(s: str) -> str:
+            for repo in sorted(result.relabel, key=len, reverse=True):
+                s = s.replace(repo, result.relabel[repo])
+            return s
+
+        scrubbed_reasoning = [
+            {
+                "text": _scrub(b.get("text", "")),
+                "evidence_refs": [_scrub(r) for r in b.get("evidence_refs", [])],
+            }
+            for b in grade_result.reasoning
+        ]
+        grade_result = _GradeResult(score=grade_result.score, reasoning=scrubbed_reasoning)
 
     markdown = render_fit(score_result, grade_result)
 

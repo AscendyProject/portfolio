@@ -31,6 +31,9 @@ Arguments (may be empty): `$ARGUMENTS`
      instead of shown inline.
    - optionally **--emit-portfolio <file>** to save the grounded Portfolio as a JSON
      file that can later be reused with `--source-type portfolio`.
+   - optionally **--mask-private** to anonymize private GitHub repo names in the output
+     before sharing. Detected from structured fields only; semantic project names are
+     NOT masked. A `masked N private repo(s)` summary is printed to stderr.
 
 2. **Run the CLI** with exactly those values (pass each as a separate argument —
    never assemble a shell string from the user's input):
@@ -41,6 +44,7 @@ Arguments (may be empty): `$ARGUMENTS`
 
    Add `--out <file>` only if the user asked to save to a file.
    Add `--emit-portfolio <file>` only if the user asked to save the Portfolio JSON.
+   Add `--mask-private` only if the user wants private repo names anonymized.
    Use `python` (not `python3`) on this host.
 
 3. **On a non-zero exit**, show the CLI's stderr message and help the user fix the

@@ -77,21 +77,21 @@ GRADE_BANDS: dict[str, tuple[int, int]] = {
 # Per-dimension bands: (name, minimum_value_inclusive, points).
 # Listed from highest to lowest so _band_for() returns the first match.
 _VOLUME_BANDS: list[tuple[str, int, int]] = [
-    ("High", 20, 2),    # 20+ PRs → 2 pts
-    ("Steady", 5, 1),   # 5–19 PRs → 1 pt
-    ("Low", 0, 0),      # 0–4 PRs → 0 pts
+    ("High", 20, 2),  # 20+ PRs → 2 pts
+    ("Steady", 5, 1),  # 5–19 PRs → 1 pt
+    ("Low", 0, 0),  # 0–4 PRs → 0 pts
 ]
 
 _BREADTH_BANDS: list[tuple[str, int, int]] = [
-    ("Wide", 30, 2),      # 30+ distinct file refs → 2 pts
+    ("Wide", 30, 2),  # 30+ distinct file refs → 2 pts
     ("Moderate", 10, 1),  # 10–29 → 1 pt
-    ("Narrow", 0, 0),     # 0–9 → 0 pts
+    ("Narrow", 0, 0),  # 0–9 → 0 pts
 ]
 
 _DIVERSITY_BANDS: list[tuple[str, int, int]] = [
-    ("Polyglot", 4, 2),   # 4+ distinct languages → 2 pts
+    ("Polyglot", 4, 2),  # 4+ distinct languages → 2 pts
     ("Versatile", 2, 1),  # 2–3 → 1 pt
-    ("Focused", 0, 0),    # 0–1 → 0 pts
+    ("Focused", 0, 0),  # 0–1 → 0 pts
 ]
 
 # Points total → grade (highest threshold first).
@@ -127,16 +127,16 @@ def _file_ext(ref: str) -> str:
 @dataclass
 class DimensionResult:
     name: str
-    value: int           # raw metric value
-    band: str            # e.g. "Low", "Steady", "High"
-    points: int          # contribution to grade total
+    value: int  # raw metric value
+    band: str  # e.g. "Low", "Steady", "High"
+    points: int  # contribution to grade total
     evidence_refs: list[str] = field(default_factory=list)
 
 
 @dataclass
 class ProfileResult:
     dimensions: dict[str, DimensionResult]  # "volume", "breadth", "stack_diversity"
-    grade: str            # S / A / B / C / D
+    grade: str  # S / A / B / C / D
     score_min: int
     score_max: int
 

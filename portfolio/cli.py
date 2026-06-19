@@ -20,7 +20,7 @@ from pathlib import Path
 from portfolio.extract import extract_merged_prs
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
-from portfolio.pipeline import resolve_to_build_result
+from portfolio.pipeline import resolve_and_optionally_mask
 from portfolio.render import render_markdown
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
@@ -37,6 +37,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-claims", type=int, default=12, help="max claims to draft (default: 12)")
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
     parser.add_argument("--emit-portfolio", dest="emit_portfolio", help="write Portfolio JSON to this file")
+    parser.add_argument(
+        "--mask-private", action="store_true", default=False, help="anonymize private GitHub repo names in output"
+    )
     return parser
 
 
@@ -47,6 +50,7 @@ def run(
     runner=run_claude,
     fetcher=fetch_html,
     synthesis_runner=None,
+    visibility_lookup=None,
 ) -> int:
     """Execute the CLI. Returns a process exit code (0 = success).
 
@@ -75,16 +79,21 @@ def run(
     # claude non-zero exit, malformed-but-valid gh JSON (wrong shape), etc. —
     # becomes a clean non-zero exit with a stderr message, not a traceback.
     try:
-        result = resolve_to_build_result(
+        result, n_masked = resolve_and_optionally_mask(
             resolved,
             subject=resolved.subject,
             runner=runner,
             max_claims=args.max_claims,
+            mask_private=args.mask_private,
             synthesis_runner=synthesis_runner,
+            visibility_lookup=visibility_lookup,
         )
     except Exception as exc:
         print(f"failed to build portfolio: {exc}", file=sys.stderr)
         return 1
+
+    if args.mask_private:
+        print(f"masked {n_masked} private repo(s)", file=sys.stderr)
 
     markdown = render_markdown(result.portfolio, synthesis=result.synthesis)
 

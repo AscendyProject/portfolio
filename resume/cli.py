@@ -19,7 +19,7 @@ from portfolio.extract import extract_merged_prs
 from portfolio.jd_source import JDFetchError, JDFileReadError, JDInvalidURLError, load_jd
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
-from portfolio.pipeline import resolve_to_build_result
+from portfolio.pipeline import resolve_and_optionally_mask
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
 from resume.render import render_resume
@@ -37,6 +37,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--jd", required=True, help="path to the job description file (plain text)")
     parser.add_argument("--top-n", type=int, default=12, help="max resume bullets to render (default: 12)")
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
+    parser.add_argument(
+        "--mask-private", action="store_true", default=False, help="anonymize private GitHub repo names in output"
+    )
     return parser
 
 
@@ -46,6 +49,7 @@ def run(
     extractor=extract_merged_prs,
     runner=run_claude,
     fetcher=fetch_html,
+    visibility_lookup=None,
 ) -> int:
     """Execute the CLI. Returns a process exit code (0 = success).
 
@@ -83,10 +87,21 @@ def run(
 
     # Extract + build inside a top-level error boundary.
     try:
-        result = resolve_to_build_result(resolved, subject=resolved.subject, runner=runner, max_claims=args.top_n)
+        result, n_masked = resolve_and_optionally_mask(
+            resolved,
+            subject=resolved.subject,
+            runner=runner,
+            max_claims=args.top_n,
+            mask_private=args.mask_private,
+            synthesis_runner=None,
+            visibility_lookup=visibility_lookup,
+        )
     except Exception as exc:
         print(f"failed to build resume: {exc}", file=sys.stderr)
         return 1
+
+    if args.mask_private:
+        print(f"masked {n_masked} private repo(s)", file=sys.stderr)
 
     draft = build_resume(result.portfolio, jd_text, args.top_n)
     markdown = render_resume(draft)

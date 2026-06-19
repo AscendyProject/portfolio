@@ -56,12 +56,8 @@ def _build_grader_prompt(portfolio: Portfolio, grade: str, band: tuple[int, int]
     same (portfolio, grade, band) inputs always produce byte-identical prompt text.
     """
     min_score, max_score = band
-    evidence_lines = "\n".join(
-        f"- {e.ref}  [{e.kind}]  {e.detail}".rstrip() for e in portfolio.evidence
-    )
-    claims_lines = "\n".join(
-        f"- {c.text}  (refs: {', '.join(c.evidence_refs)})" for c in portfolio.claims
-    )
+    evidence_lines = "\n".join(f"- {e.ref}  [{e.kind}]  {e.detail}".rstrip() for e in portfolio.evidence)
+    claims_lines = "\n".join(f"- {c.text}  (refs: {', '.join(c.evidence_refs)})" for c in portfolio.claims)
     return (
         f"You are a grader assessing how well a developer's grounded portfolio matches a job description.\n"
         f"The overall grade has been locked to: {grade}\n"

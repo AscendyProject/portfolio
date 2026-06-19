@@ -28,6 +28,9 @@ Arguments (may be empty): `$ARGUMENTS`
    - **jd path or URL** — filesystem path to a plain-text job description file, or an `http(s)` URL to a job posting page (required). When a URL is supplied the page is fetched and its article text is used as the JD.
    - optionally **--out <file>** if the user wants the Markdown written to a file
      instead of shown inline.
+   - optionally **--mask-private** to anonymize private GitHub repo names in the output
+     before sharing. Detected from structured fields only; semantic project names are
+     NOT masked. A `masked N private repo(s)` summary is printed to stderr.
 
 2. **Run the CLI** with exactly those values (pass each as a separate argument —
    never assemble a shell string from the user's input, never use command
@@ -38,6 +41,7 @@ Arguments (may be empty): `$ARGUMENTS`
    ```
 
    Add `--out <file>` only if the user asked to save to a file.
+   Add `--mask-private` only if the user wants private repo names anonymized.
    Use `python` (not `python3`) on this host.
 
 3. **On a non-zero exit**, show the CLI's stderr message and help the user fix the

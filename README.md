@@ -200,7 +200,43 @@ this source type with no additional flags.
 
 > **Private-repo names:** `gh search prs` may return PRs in private repos the token
 > can access. That is intentional — it gives the most honest self-assessment. If you
-> share the output, **redact private repo names before distributing.**
+> share the output, **use `--mask-private` or redact private repo names before distributing.**
+
+### `--mask-private` — anonymize private repos
+
+All five CLIs accept `--mask-private` to replace private GitHub repo names in the output
+before the rendered Markdown is written, so a shared artifact never leaks a private repo name.
+
+```bash
+python -m portfolio --source-type github-author --author <handle> --mask-private
+python -m resume    --source-type github-author --author <handle> --jd jd.txt --mask-private
+python -m fit       --source-type github-author --author <handle> --jd jd.txt --mask-private
+python -m rating    --source-type github-author --author <handle> --mask-private
+python -m reference_check --source-type github-author --author <handle> --mask-private
+```
+
+When `--mask-private` is set:
+
+1. The full extract → narrate → ground pipeline runs first (no synthesis yet).
+2. Every `owner/repo` found in structured evidence fields (`ref`, `url`) and claim
+   `evidence_refs` is looked up via `gh repo view --json isPrivate`.
+3. Private repos are relabeled `private-repo-1`, `private-repo-2`, … (sorted by name
+   for determinism). Every occurrence in `ref`, `url`, `detail`, `context`, `claim.text`,
+   and `claim.evidence_refs` is rewritten using the same map.
+4. Synthesis (if enabled) runs on the already-masked portfolio; the model's output text is
+   scrubbed again after synthesis so any private name the model emitted on its own is removed.
+5. A summary line `masked N private repo(s)` is printed to stderr.
+
+**Scope limit:** only literal `owner/repo` substrings are masked — detected from structured
+fields only (`evidence.ref`, `evidence.url`, `claim.evidence_refs`). Semantic project names
+a model wrote into claim text (e.g. "billing service") are **not** masked. Free text in
+`evidence.detail`, `evidence.context`, and `claim.text` is a *substitution target* (already-
+discovered private repo names are replaced in them), but never a *discovery source*.
+
+To avoid masking ordinary file paths, a candidate whose repo segment ends in a common
+source-file extension (e.g. `app/auth.py`) is treated as a path, not a repo, and is **not**
+discovered. Trade-off: a real repository literally named `*.py` / `*.js` / etc. would be
+skipped — vanishingly rare in practice.
 
 ## Dev
 
