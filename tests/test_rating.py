@@ -693,3 +693,48 @@ def test_rating_slash_command_shape():
             assert "rank" not in line_lower, f"forbidden 'rank' in command line: {stripped!r}"
             assert "percentile" not in line_lower, f"forbidden 'percentile' in command line: {stripped!r}"
             assert "top " not in line_lower, f"forbidden 'top ' in command line: {stripped!r}"
+
+
+# ---------------------------------------------------------------------------
+# Done-when: EXT_TO_LANG public alias and language_for_ref helper
+# ---------------------------------------------------------------------------
+
+
+def test_ext_to_lang_is_same_object_as_private():
+    """EXT_TO_LANG is the same dict object as _EXT_TO_LANG (no copy, additive alias).
+
+    Outcome: 'asserts EXT_TO_LANG is _EXT_TO_LANG.'
+    """
+    from rating.profile import EXT_TO_LANG, _EXT_TO_LANG
+
+    assert EXT_TO_LANG is _EXT_TO_LANG
+
+
+def test_language_for_ref_known_extension():
+    """language_for_ref('app/auth.py') == 'Python'.
+
+    Outcome: 'language_for_ref("app/auth.py") == "Python".'
+    """
+    from rating.profile import language_for_ref
+
+    assert language_for_ref("app/auth.py") == "Python"
+
+
+def test_language_for_ref_no_extension():
+    """language_for_ref('Makefile') == 'other'.
+
+    Outcome: 'language_for_ref("Makefile") == "other".'
+    """
+    from rating.profile import language_for_ref
+
+    assert language_for_ref("Makefile") == "other"
+
+
+def test_language_for_ref_pr_ref():
+    """language_for_ref('PR#1') == 'other'.
+
+    Outcome: 'language_for_ref("PR#1") == "other".'
+    """
+    from rating.profile import language_for_ref
+
+    assert language_for_ref("PR#1") == "other"

@@ -48,6 +48,11 @@ Arguments (may be empty): `$ARGUMENTS`
      (`grounded: N  rejected: N  needs-confirmation: N`) so they can see how many
      drafted claims were dropped for lacking real evidence.
 
+   The output now leads with a grounded headline blockquote, a stats line (merged-PR
+   count · distinct repos · language stack), an optional `## Highlights` section
+   (bullets citing grounded refs), and per-language `## <Group>` sections for the
+   claims — `## Other` always appears last.
+
 ## Hard rules
 
 - Use ONLY the source URL and author the user supplies. Never fabricate a repo,

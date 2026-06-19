@@ -82,6 +82,14 @@ Run `python -m portfolio --source-type github --source <url> --author <handle>` 
 `--source-type web`) to render a grounded portfolio as Markdown. The `/portfolio`
 slash command is the interactive front door.
 
+The rendered document leads with a grounded headline blockquote (model-authored, or a
+deterministic fallback when grounding fails), followed by a stats line showing merged-PR
+count, distinct repo count, and the detected language stack. When the model returns
+synthesis highlights that cite only already-grounded claim refs, an optional
+`## Highlights` section lists them with their cited refs in parentheses. The remaining
+claims are grouped under `## <Language>` headings by majority file-extension language,
+with `## Other` always last.
+
 ### `/resume` command
 
 Run `python -m resume --source-type <type> --source <url> --author <handle> --jd <path-or-url>`
