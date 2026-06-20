@@ -186,7 +186,10 @@ def render_markdown(portfolio: Portfolio, *, synthesis: SynthesisResult | None =
         lines.append("")
         for bullet in synthesis.highlights:
             escaped_text = _escape(bullet.text)
-            if show_refs and bullet.evidence_refs:
+            if show_refs:
+                # Pre-change behavior rendered the `(refs: …)` suffix unconditionally
+                # (even for empty evidence_refs → `(refs: )`); --show-refs restores it
+                # byte-for-byte. Default (show_refs=False) drops the suffix entirely.
                 escaped_refs = ", ".join(_escape(r) for r in bullet.evidence_refs)
                 lines.append(f"- {escaped_text} (refs: {escaped_refs})")
             else:

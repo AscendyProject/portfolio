@@ -131,12 +131,15 @@ def test_end_to_end_refs_visible_with_show_refs(capsys):
     """'With --show-refs, evidence refs appear in the letter body.'"""
     runner = _make_counter_runner(_NARRATE_ONE, _LETTER_ONE)
     code = run(_base_argv() + ["--show-refs"], extractor=_fake_extractor, runner=runner)
-    out = capsys.readouterr().out
+    cap = capsys.readouterr()
+    out = cap.out
     assert code == 0
     assert "Dear Hiring Manager" in out
     # Evidence ref appears in output with --show-refs (escaped form PR\#1 or at least PR)
     assert "PR" in out
     assert "*[" in out
+    # IR-001: the stderr grounding summary prints even with --show-refs
+    assert "grounded:" in cap.err
 
 
 # ---------------------------------------------------------------------------

@@ -863,3 +863,25 @@ def test_per_claim_ref_and_url_hidden_by_default():
     assert "https://github.com/o/r/pull/1" not in out
     assert "Fixed the bug" not in out
     assert "Evidence:" not in out
+
+
+def test_highlight_empty_refs_byte_identical_under_show_refs():
+    """IR-002: a synthesis highlight with EMPTY evidence_refs renders the
+    `(refs: )` suffix under show_refs=True (pre-change byte-identity — the old
+    renderer emitted the suffix unconditionally), and no suffix by default."""
+    p = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="PR#1")],
+        claims=[Claim(text="c", evidence_refs=["PR#1"], confidence=0.9, grounded=True)],
+    )
+    synth = SynthesisResult(
+        headline=None,
+        headline_refs=[],
+        highlights=[HighlightBullet(text="did a thing", evidence_refs=[])],
+    )
+    out_show = render_markdown(p, synthesis=synth, show_refs=True)
+    assert "- did a thing (refs: )" in out_show  # empty-refs suffix preserved
+
+    out_hide = render_markdown(p, synthesis=synth, show_refs=False)
+    assert "- did a thing" in out_hide
+    assert "(refs:" not in out_hide  # suffix dropped by default
