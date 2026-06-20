@@ -177,7 +177,12 @@ def test_experience_heading_present():
 
 
 def test_within_group_order_matches_selected_order():
-    """Done-when: within each group, bullets appear in the same order as draft.selected."""
+    """Done-when: within each group, bullets appear in the same order as draft.selected.
+
+    Discriminating assertion: also verifies that both bullets appear inside the
+    ## Python stack group section, which is only emitted by the task-019 render_resume
+    implementation (not by the pre-task-019 flat-list renderer).
+    """
     ev_py1 = Evidence(kind="file", ref="a.py")
     ev_py2 = Evidence(kind="file", ref="b.py")
     claim1 = Claim(text="First Python claim", evidence_refs=["a.py"], confidence=0.9, grounded=True)
@@ -190,6 +195,17 @@ def test_within_group_order_matches_selected_order():
     idx1 = out.index("First Python claim")
     idx2 = out.index("Second Python claim")
     assert idx1 < idx2
+    # Discriminating: both bullets must be rendered inside the ## Python group section.
+    lines = out.splitlines()
+    python_heading_idx = next(i for i, ln in enumerate(lines) if ln == "## Python")
+    # Find next ## heading after ## Python (or end of output).
+    next_heading_idx = next(
+        (i for i, ln in enumerate(lines) if i > python_heading_idx and ln.startswith("## ")),
+        len(lines),
+    )
+    python_section_lines = lines[python_heading_idx:next_heading_idx]
+    assert any("First Python claim" in ln for ln in python_section_lines)
+    assert any("Second Python claim" in ln for ln in python_section_lines)
 
 
 # ---------------------------------------------------------------------------

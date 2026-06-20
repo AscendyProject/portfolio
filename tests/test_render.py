@@ -900,7 +900,21 @@ def test_render_markdown_regression_multi_group_behavior_preserving():
 
     Pins the complete rendered string so any behaviour change in claim_group,
     count_repos_from_refs, or stack_languages is immediately caught.
+
+    Discriminating assertion: also verifies that the three public helpers introduced
+    by task-019 exist in portfolio.render and are callable. The pre-task-019 module
+    only had private underscore-prefixed versions (_claim_group, _count_repos,
+    _stack_summary), so this assertion fails against pre-change code.
     """
+    import portfolio.render as _pr
+
+    # Discriminating: public helpers must exist as callables in portfolio.render.
+    assert callable(getattr(_pr, "claim_group", None)), "portfolio.render.claim_group must be a public callable"
+    assert callable(getattr(_pr, "count_repos_from_refs", None)), (
+        "portfolio.render.count_repos_from_refs must be a public callable"
+    )
+    assert callable(getattr(_pr, "stack_languages", None)), "portfolio.render.stack_languages must be a public callable"
+
     p = Portfolio(
         subject="carol",
         evidence=[
