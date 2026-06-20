@@ -232,3 +232,44 @@ def test_registered_handler_is_usable_through_the_cli(capsys):
     assert code == 0  # argparse accepted "fake" and the handler was dispatched
     assert out.startswith("# Portfolio")
     assert "zoe" in out  # subject came from the registered handler
+
+
+# ---------------------------------------------------------------------------
+# Done-when: --show-refs flag hides refs by default, reveals them when passed
+# ---------------------------------------------------------------------------
+
+
+def test_show_refs_default_hides_refs(capsys):
+    """'With --show-refs omitted, stdout contains no Evidence: block or inline ref text.'"""
+    code = run(_github_argv(), extractor=_fake_extractor, runner=_fake_runner)
+    captured = capsys.readouterr()
+    assert code == 0
+    # No Evidence block, no raw ref numbers from the Evidence sub-list
+    assert "Evidence:" not in captured.out
+    # The ref PR#1 should NOT appear as a sub-item (only in stats line as "1 merged PRs")
+    assert "PR\\#1" not in captured.out
+    assert "https://github.com/o/r/pull/1" not in captured.out
+
+
+def test_show_refs_flag_reveals_refs(capsys):
+    """'With --show-refs, stdout contains the Evidence: block and ref text.'"""
+    argv = _github_argv() + ["--show-refs"]
+    code = run(argv, extractor=_fake_extractor, runner=_fake_runner)
+    captured = capsys.readouterr()
+    assert code == 0
+    # Evidence block present and ref appears
+    assert "Evidence:" in captured.out
+    assert "PR" in captured.out
+
+
+def test_show_refs_grounding_summary_unchanged(capsys):
+    """'stderr grounded/rejected/needs-confirmation summary appears with and without --show-refs.'"""
+    # Without --show-refs
+    run(_github_argv(), extractor=_fake_extractor, runner=_fake_runner)
+    err1 = capsys.readouterr().err.lower()
+    assert "grounded:" in err1 and "rejected:" in err1 and "needs-confirmation:" in err1
+
+    # With --show-refs
+    run(_github_argv() + ["--show-refs"], extractor=_fake_extractor, runner=_fake_runner)
+    err2 = capsys.readouterr().err.lower()
+    assert "grounded:" in err2 and "rejected:" in err2 and "needs-confirmation:" in err2

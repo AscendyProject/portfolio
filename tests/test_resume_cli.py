@@ -356,7 +356,7 @@ def test_evidence_ref_markdown_injection_escaped(tmp_path, capsys):
         return json.dumps([{"text": "Built a python thing", "evidence_refs": [injected_ref], "confidence": 0.9}])
 
     code = run(
-        _base_argv(jd_path),
+        _base_argv(jd_path) + ["--show-refs"],
         extractor=extractor_with_tricky_ref,
         runner=runner_citing_tricky_ref,
     )
@@ -510,3 +510,24 @@ def test_resume_slash_command_documents_jd_url():
     assert "url" in lower and "--jd" in lower
     # Must not still say "filesystem path only"
     assert "filesystem path only" not in lower
+
+
+def test_resume_show_refs_toggle_and_summary(tmp_path, capsys):
+    """IR-001: default output hides refs, --show-refs reveals them, and the
+    stderr grounding summary prints in BOTH modes."""
+    jd_path = _make_jd(tmp_path)
+
+    # Default: no inline [refs] in the body; summary on stderr.
+    code = run(_base_argv(jd_path), extractor=_fake_extractor, runner=_fake_runner)
+    cap = capsys.readouterr()
+    assert code == 0
+    assert "# Resume" in cap.out
+    assert "[" not in cap.out  # no `[refs]` suffix anywhere in the body
+    assert "grounded:" in cap.err
+
+    # --show-refs: refs reappear in the body; summary still on stderr.
+    code = run(_base_argv(jd_path) + ["--show-refs"], extractor=_fake_extractor, runner=_fake_runner)
+    cap = capsys.readouterr()
+    assert code == 0
+    assert "[" in cap.out  # `[refs]` suffix present
+    assert "grounded:" in cap.err

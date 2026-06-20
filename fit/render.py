@@ -10,7 +10,7 @@ from fit.score import ScoreResult
 from portfolio.render import _escape
 
 
-def render_fit(score_result: ScoreResult, grade_result: GradeResult) -> str:
+def render_fit(score_result: ScoreResult, grade_result: GradeResult, *, show_refs: bool = False) -> str:
     """Render the /fit analysis as a Markdown string.
 
     Contains:
@@ -43,8 +43,11 @@ def render_fit(score_result: ScoreResult, grade_result: GradeResult) -> str:
     if score_result.covered:
         for kw in sorted(score_result.covered.keys()):
             refs = score_result.covered[kw]
-            refs_str = ", ".join(_escape(r) for r in refs)
-            lines.append(f"- `{_escape(kw)}` — {refs_str}")
+            if show_refs:
+                refs_str = ", ".join(_escape(r) for r in refs)
+                lines.append(f"- `{_escape(kw)}` — {refs_str}")
+            else:
+                lines.append(f"- `{_escape(kw)}`")
     else:
         lines.append("_none_")
     lines.append("")
@@ -66,7 +69,7 @@ def render_fit(score_result: ScoreResult, grade_result: GradeResult) -> str:
         for bullet in grade_result.reasoning:
             text = _escape(str(bullet.get("text", "")))
             refs = bullet.get("evidence_refs", [])
-            if refs:
+            if show_refs and refs:
                 refs_str = ", ".join(_escape(r) for r in refs)
                 lines.append(f"- {text} _(refs: {refs_str})_")
             else:

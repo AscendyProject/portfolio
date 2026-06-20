@@ -107,13 +107,13 @@ def _claim_group(claim, evidence_by_ref: dict) -> str:
     return candidates[0]
 
 
-def _render_claim_block(claim, evidence_by_ref: dict) -> list[str]:
+def _render_claim_block(claim, evidence_by_ref: dict, *, show_refs: bool = False) -> list[str]:
     """Render the per-claim block: ### heading, confidence, evidence."""
     lines: list[str] = []
     lines.append(f"### {_escape(claim.text)}")
     lines.append("")
     lines.append(f"- Confidence: {claim.confidence:.2f}")
-    if claim.evidence_refs:
+    if show_refs and claim.evidence_refs:
         lines.append("- Evidence:")
         for ref in claim.evidence_refs:
             ev = evidence_by_ref.get(ref)
@@ -133,7 +133,7 @@ def _render_claim_block(claim, evidence_by_ref: dict) -> list[str]:
     return lines
 
 
-def render_markdown(portfolio: Portfolio, *, synthesis: SynthesisResult | None = None) -> str:
+def render_markdown(portfolio: Portfolio, *, synthesis: SynthesisResult | None = None, show_refs: bool = False) -> str:
     """Render a grounded Portfolio to a Markdown string.
 
     When synthesis is provided and has a grounded headline, the output is:
@@ -186,8 +186,14 @@ def render_markdown(portfolio: Portfolio, *, synthesis: SynthesisResult | None =
         lines.append("")
         for bullet in synthesis.highlights:
             escaped_text = _escape(bullet.text)
-            escaped_refs = ", ".join(_escape(r) for r in bullet.evidence_refs)
-            lines.append(f"- {escaped_text} (refs: {escaped_refs})")
+            if show_refs:
+                # Pre-change behavior rendered the `(refs: …)` suffix unconditionally
+                # (even for empty evidence_refs → `(refs: )`); --show-refs restores it
+                # byte-for-byte. Default (show_refs=False) drops the suffix entirely.
+                escaped_refs = ", ".join(_escape(r) for r in bullet.evidence_refs)
+                lines.append(f"- {escaped_text} (refs: {escaped_refs})")
+            else:
+                lines.append(f"- {escaped_text}")
         lines.append("")
 
     # --- Grouped claim sections ---
@@ -207,6 +213,6 @@ def render_markdown(portfolio: Portfolio, *, synthesis: SynthesisResult | None =
         lines.append(f"## {group_name}")
         lines.append("")
         for claim in claims:
-            lines.extend(_render_claim_block(claim, evidence_by_ref))
+            lines.extend(_render_claim_block(claim, evidence_by_ref, show_refs=show_refs))
 
     return "\n".join(lines)

@@ -734,7 +734,7 @@ def test_fit_cli_mask_private(tmp_path, capsys):
 
 
 def test_fit_cli_no_mask_private_unchanged(tmp_path, capsys):
-    """fit CLI without --mask-private: private name appears, no masked line."""
+    """fit CLI without --mask-private: private name appears (with --show-refs), no masked line."""
     from fit.cli import run
 
     jd = tmp_path / "jd.txt"
@@ -744,7 +744,17 @@ def test_fit_cli_no_mask_private_unchanged(tmp_path, capsys):
         return json.dumps({"score": 75, "reasoning": [{"text": "Good", "evidence_refs": ["acme/svc#1"]}]})
 
     code = run(
-        ["--source-type", "github", "--source", "https://github.com/owner/repo", "--author", "alice", "--jd", str(jd)],
+        [
+            "--source-type",
+            "github",
+            "--source",
+            "https://github.com/owner/repo",
+            "--author",
+            "alice",
+            "--jd",
+            str(jd),
+            "--show-refs",
+        ],
         extractor=_fake_github_extractor,
         runner=_fake_runner_for_private,
         grader_runner=fit_grader,
@@ -782,14 +792,14 @@ def test_rating_cli_mask_private(capsys):
 
 
 def test_rating_cli_no_mask_private_unchanged(capsys):
-    """rating CLI without --mask-private: private name appears, no masked line."""
+    """rating CLI without --mask-private: private name appears (with --show-refs), no masked line."""
     from rating.cli import run
 
     def rating_grader(prompt: str, temperature: int = 0) -> str:
         return json.dumps({"score": 70, "reasoning": [{"text": "Good work", "evidence_refs": ["acme/svc#1"]}]})
 
     code = run(
-        ["--source-type", "github", "--source", "https://github.com/owner/repo", "--author", "alice"],
+        ["--source-type", "github", "--source", "https://github.com/owner/repo", "--author", "alice", "--show-refs"],
         extractor=_fake_github_extractor,
         runner=_fake_runner_for_private,
         grader_runner=rating_grader,
@@ -1022,3 +1032,179 @@ def test_reference_check_downstream_letter_scrub_adversarial(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "acme/svc" not in out, "private name leaked through the letter prose (scrub missing)"
+
+
+# ---------------------------------------------------------------------------
+# --show-refs --mask-private composition tests (one per CLI)
+# ---------------------------------------------------------------------------
+
+
+def test_portfolio_cli_show_refs_and_mask_private(capsys):
+    """portfolio CLI: --show-refs --mask-private shows refs in masked form; no raw private name."""
+    from portfolio.cli import run
+
+    code = run(
+        [
+            "--source-type",
+            "github",
+            "--source",
+            "https://github.com/owner/repo",
+            "--author",
+            "alice",
+            "--show-refs",
+            "--mask-private",
+        ],
+        extractor=_fake_github_extractor,
+        runner=_fake_runner_for_private,
+        visibility_lookup=_private_lookup,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    # Masked form must appear (ref displayed)
+    assert "private-repo-1" in captured.out
+    # Raw private name must NOT appear
+    assert "acme/svc" not in captured.out
+
+
+def test_resume_cli_show_refs_and_mask_private(tmp_path, capsys):
+    """resume CLI: --show-refs --mask-private shows refs in masked form; no raw private name."""
+    from resume.cli import run
+
+    jd = tmp_path / "jd.txt"
+    jd.write_text("backend engineer python", encoding="utf-8")
+
+    def backend_runner_for_private(prompt: str) -> str:
+        # Claim text matches JD keywords (backend, python) and cites the private ref
+        return json.dumps(
+            [{"text": "Built backend python service", "evidence_refs": ["acme/svc#1"], "confidence": 0.9}]
+        )
+
+    code = run(
+        [
+            "--source-type",
+            "github",
+            "--source",
+            "https://github.com/owner/repo",
+            "--author",
+            "alice",
+            "--jd",
+            str(jd),
+            "--show-refs",
+            "--mask-private",
+        ],
+        extractor=_fake_github_extractor,
+        runner=backend_runner_for_private,
+        visibility_lookup=_private_lookup,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    # Masked ref must appear in output (inline refs via --show-refs)
+    assert "private-repo-1" in captured.out
+    # Raw private name must NOT appear
+    assert "acme/svc" not in captured.out
+
+
+def test_fit_cli_show_refs_and_mask_private(tmp_path, capsys):
+    """fit CLI: --show-refs --mask-private shows refs in masked form; no raw private name."""
+    from fit.cli import run
+
+    jd = tmp_path / "jd.txt"
+    jd.write_text("backend engineer python", encoding="utf-8")
+
+    def fit_grader(prompt: str, temperature: int = 0) -> str:
+        return json.dumps({"score": 75, "reasoning": [{"text": "Good work", "evidence_refs": ["private-repo-1#1"]}]})
+
+    code = run(
+        [
+            "--source-type",
+            "github",
+            "--source",
+            "https://github.com/owner/repo",
+            "--author",
+            "alice",
+            "--jd",
+            str(jd),
+            "--show-refs",
+            "--mask-private",
+        ],
+        extractor=_fake_github_extractor,
+        runner=_fake_runner_for_private,
+        grader_runner=fit_grader,
+        visibility_lookup=_private_lookup,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    # Masked ref must appear in output (reasoning _(refs: private-repo-1#1)_)
+    assert "private-repo-1" in captured.out
+    # Raw private name must NOT appear
+    assert "acme/svc" not in captured.out
+
+
+def test_rating_cli_show_refs_and_mask_private(capsys):
+    """rating CLI: --show-refs --mask-private shows refs in masked form; no raw private name."""
+    from rating.cli import run
+
+    def rating_grader(prompt: str, temperature: int = 0) -> str:
+        return json.dumps({"score": 70, "reasoning": [{"text": "Good work", "evidence_refs": ["private-repo-1#1"]}]})
+
+    code = run(
+        [
+            "--source-type",
+            "github",
+            "--source",
+            "https://github.com/owner/repo",
+            "--author",
+            "alice",
+            "--show-refs",
+            "--mask-private",
+        ],
+        extractor=_fake_github_extractor,
+        runner=_fake_runner_for_private,
+        grader_runner=rating_grader,
+        visibility_lookup=_private_lookup,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    # Masked ref must appear in output (Evidence refs: private-repo-1#1)
+    assert "private-repo-1" in captured.out
+    # Raw private name must NOT appear
+    assert "acme/svc" not in captured.out
+
+
+def test_reference_check_cli_show_refs_and_mask_private(capsys):
+    """reference_check CLI: --show-refs --mask-private shows refs in masked form; no raw private name."""
+    from reference_check.cli import run
+
+    call_count = [0]
+
+    def rc_runner(prompt: str) -> str:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            # Narration phase: return claim citing the private ref (will be masked)
+            return json.dumps(
+                [{"text": "Built feature in acme/svc", "evidence_refs": ["acme/svc#1"], "confidence": 0.9}]
+            )
+        # Letter phase: cite the already-masked ref
+        return json.dumps([{"text": "Developer improved performance.", "evidence_refs": ["private-repo-1#1"]}])
+
+    code = run(
+        [
+            "--source-type",
+            "github",
+            "--source",
+            "https://github.com/owner/repo",
+            "--author",
+            "alice",
+            "--show-refs",
+            "--mask-private",
+        ],
+        extractor=_fake_github_extractor,
+        runner=rc_runner,
+        visibility_lookup=_private_lookup,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    # Masked ref must appear (rendered via *[private-repo-1#1]*)
+    assert "private-repo-1" in captured.out
+    # Raw private name must NOT appear
+    assert "acme/svc" not in captured.out

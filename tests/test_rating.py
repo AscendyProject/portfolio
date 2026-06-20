@@ -738,3 +738,96 @@ def test_language_for_ref_pr_ref():
     from rating.profile import language_for_ref
 
     assert language_for_ref("PR#1") == "other"
+
+
+# ---------------------------------------------------------------------------
+# Done-when: render_rating show_refs toggle
+# ---------------------------------------------------------------------------
+
+
+def test_render_rating_hides_evidence_refs_by_default():
+    """'render_rating with show_refs=False (default): no Evidence refs: line emitted.'"""
+    portfolio = _make_portfolio()
+    profile_result = profile(portfolio)
+    grade_result = grade(portfolio, profile_result, _make_simple_grader())
+    markdown = render_rating(portfolio, profile_result, grade_result)
+    assert "Evidence refs:" not in markdown
+    assert "_(refs:" not in markdown
+
+
+def test_render_rating_shows_evidence_refs_with_show_refs():
+    """'render_rating with show_refs=True: Evidence refs: line appears for dims with refs.'"""
+    portfolio = _make_portfolio()
+    profile_result = profile(portfolio)
+    grade_result = grade(portfolio, profile_result, _make_simple_grader())
+    markdown = render_rating(portfolio, profile_result, grade_result, show_refs=True)
+    # Volume dim has PR refs; Evidence refs line must appear
+    assert "Evidence refs:" in markdown
+
+
+def test_render_rating_show_refs_true_identical_to_previous_default():
+    """'render_rating(show_refs=True) is byte-identical to the pre-change default.'"""
+    portfolio = _make_portfolio()
+    profile_result = profile(portfolio)
+    grade_result = grade(portfolio, profile_result, _make_simple_grader())
+    # show_refs=True should produce same output as the old (pre-change) default
+    out_true = render_rating(portfolio, profile_result, grade_result, show_refs=True)
+    assert "Evidence refs:" in out_true
+    assert "_(refs:" in out_true
+
+
+def test_rating_cli_show_refs_default_hides_refs(capsys):
+    """'CLI without --show-refs: stdout has no Evidence refs: or _(refs: …)_ text.'"""
+    code = run(
+        ["--source-type", "github", "--source", "https://github.com/o/r", "--author", "alice"],
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "Evidence refs:" not in captured.out
+    assert "_(refs:" not in captured.out
+
+
+def test_rating_cli_show_refs_reveals_refs(capsys):
+    """'CLI with --show-refs: stdout contains Evidence refs: for a fixture with refs.'"""
+    code = run(
+        [
+            "--source-type",
+            "github",
+            "--source",
+            "https://github.com/o/r",
+            "--author",
+            "alice",
+            "--show-refs",
+        ],
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    # Volume dimension cites PR#1; Evidence refs: must appear
+    assert "Evidence refs:" in captured.out
+
+
+def test_rating_cli_show_refs_stderr_summary_unchanged(capsys):
+    """'stderr grounded/rejected/needs-confirmation appears with and without --show-refs.'"""
+    run(
+        ["--source-type", "github", "--source", "https://github.com/o/r", "--author", "alice"],
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+    )
+    err1 = capsys.readouterr().err.lower()
+    assert "grounded:" in err1
+
+    run(
+        ["--source-type", "github", "--source", "https://github.com/o/r", "--author", "alice", "--show-refs"],
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+    )
+    err2 = capsys.readouterr().err.lower()
+    assert "grounded:" in err2

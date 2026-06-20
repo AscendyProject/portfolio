@@ -40,6 +40,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mask-private", action="store_true", default=False, help="anonymize private GitHub repo names in output"
     )
+    parser.add_argument(
+        "--show-refs", action="store_true", default=False, help="include grounding refs in rendered output"
+    )
     return parser
 
 
@@ -104,7 +107,7 @@ def run(
         print(f"masked {n_masked} private repo(s)", file=sys.stderr)
 
     draft = build_resume(result.portfolio, jd_text, args.top_n)
-    markdown = render_resume(draft)
+    markdown = render_resume(draft, show_refs=args.show_refs)
 
     grounding = result.grounding
     print(

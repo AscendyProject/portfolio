@@ -16,7 +16,7 @@ from portfolio.render import _escape
 _NO_BULLETS_NOTICE = "_no grounded resume bullets_"
 
 
-def render_resume(draft: ResumeDraft) -> str:
+def render_resume(draft: ResumeDraft, *, show_refs: bool = False) -> str:
     """Render a ResumeDraft to a Markdown string.
 
     For every selected ScoredClaim the output contains:
@@ -37,8 +37,11 @@ def render_resume(draft: ResumeDraft) -> str:
         return "\n".join(lines)
 
     for sc in draft.selected:
-        refs_str = ", ".join(_escape(ref) for ref in sc.claim.evidence_refs)
-        lines.append(f"- {_escape(sc.claim.text)} [{refs_str}]")
+        if show_refs:
+            refs_str = ", ".join(_escape(ref) for ref in sc.claim.evidence_refs)
+            lines.append(f"- {_escape(sc.claim.text)} [{refs_str}]")
+        else:
+            lines.append(f"- {_escape(sc.claim.text)}")
 
     lines.append("")
     return "\n".join(lines)
