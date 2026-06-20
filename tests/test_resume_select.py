@@ -303,3 +303,49 @@ def test_resume_draft_structure():
     assert draft.subject == "alice"
     assert draft.selected == []
     assert draft.jd_keywords_matched == {"python"}
+
+
+# ── ResumeDraft: new fields (Done-when items) ─────────────────────────────
+
+
+def test_jd_keywords_total_empty_jd():
+    """Done-when: build_resume.jd_keywords_total == 0 for empty-string JD."""
+    ev = _evidence("PR#1")
+    claim = _claim("python developer", ["PR#1"])
+    portfolio = _portfolio(claims=[claim], evidence=[ev])
+    draft = build_resume(portfolio, "", top_n=5)
+    assert draft.jd_keywords_total == 0
+
+
+def test_jd_keywords_total_multi_token_jd():
+    """Done-when: build_resume.jd_keywords_total == len(jd_keywords(jd_text)) for multi-token JD."""
+    ev = _evidence("PR#1")
+    claim = _claim("python developer backend api", ["PR#1"])
+    portfolio = _portfolio(claims=[claim], evidence=[ev])
+    jd_text = "python developer backend api"
+    draft = build_resume(portfolio, jd_text, top_n=5)
+    assert draft.jd_keywords_total == len(jd_keywords(jd_text))
+
+
+def test_jd_keywords_total_stopwords_only_jd():
+    """Done-when: build_resume.jd_keywords_total == 0 for stopword-only JD."""
+    ev = _evidence("PR#1")
+    claim = _claim("python developer", ["PR#1"])
+    portfolio = _portfolio(claims=[claim], evidence=[ev])
+    stopword_jd = " ".join(sorted(STOPWORDS))
+    draft = build_resume(portfolio, stopword_jd, top_n=5)
+    assert draft.jd_keywords_total == 0
+    assert len(jd_keywords(stopword_jd)) == 0
+
+
+def test_evidence_by_ref_equals_portfolio_evidence():
+    """Done-when: build_resume.evidence_by_ref == {e.ref: e for e in portfolio.evidence}."""
+    from portfolio.model import Evidence as Ev
+
+    pr_ev = Ev(kind="pr", ref="PR#1")
+    file_ev = Ev(kind="file", ref="main.py")
+    claim = _claim("python developer", ["PR#1", "main.py"])
+    portfolio = Portfolio(subject="dave", evidence=[pr_ev, file_ev], claims=[claim])
+    draft = build_resume(portfolio, "python", top_n=5)
+    expected = {"PR#1": pr_ev, "main.py": file_ev}
+    assert draft.evidence_by_ref == expected

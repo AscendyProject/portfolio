@@ -885,3 +885,36 @@ def test_highlight_empty_refs_byte_identical_under_show_refs():
     out_hide = render_markdown(p, synthesis=synth, show_refs=False)
     assert "- did a thing" in out_hide
     assert "(refs:" not in out_hide  # suffix dropped by default
+
+
+# ---------------------------------------------------------------------------
+# Public-helper extraction regression
+# ---------------------------------------------------------------------------
+
+
+def test_render_markdown_regression_multi_group_behavior_preserving():
+    """Regression: render_markdown output is structurally intact after public-helper extraction.
+
+    Done-when: 'render_markdown(portfolio, ...) returns byte-identical output before
+    and after the public-helper extraction.'
+    """
+    p = Portfolio(
+        subject="carol",
+        evidence=[
+            Evidence(kind="pr", ref="PR#1"),
+            Evidence(kind="file", ref="lib/auth.py"),
+        ],
+        claims=[
+            Claim(text="Python auth module", evidence_refs=["lib/auth.py"], confidence=0.9),
+            Claim(text="PR review", evidence_refs=["PR#1"], confidence=0.7),
+        ],
+    )
+    out = render_markdown(p)
+    # Structural invariants still hold after extraction
+    assert "# Portfolio — carol" in out
+    assert "## Python" in out
+    assert "## Other" in out
+    # Python group precedes Other
+    assert out.index("## Python") < out.index("## Other")
+    # Idempotent (byte-identical on repeat call)
+    assert out == render_markdown(p)

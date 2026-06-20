@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from portfolio.model import Claim, Portfolio
+from portfolio.model import Claim, Evidence, Portfolio
 
 # ── Stopwords ─────────────────────────────────────────────────────────────────
 # Small, pinned set. Tests import this constant directly to verify coverage.
@@ -96,6 +96,8 @@ class ResumeDraft:
     subject: str
     selected: list[ScoredClaim] = field(default_factory=list)
     jd_keywords_matched: set[str] = field(default_factory=set)
+    jd_keywords_total: int = 0
+    evidence_by_ref: dict[str, Evidence] = field(default_factory=dict)
 
 
 # ── Selection ─────────────────────────────────────────────────────────────────
@@ -154,4 +156,10 @@ def build_resume(portfolio: Portfolio, jd_text: str, top_n: int) -> ResumeDraft:
     matched: set[str] = set()
     for sc in verified:
         matched |= sc.matched_keywords
-    return ResumeDraft(subject=portfolio.subject, selected=verified, jd_keywords_matched=matched)
+    return ResumeDraft(
+        subject=portfolio.subject,
+        selected=verified,
+        jd_keywords_matched=matched,
+        jd_keywords_total=len(kw),
+        evidence_by_ref={e.ref: e for e in portfolio.evidence},
+    )
