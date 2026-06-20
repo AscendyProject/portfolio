@@ -885,3 +885,70 @@ def test_highlight_empty_refs_byte_identical_under_show_refs():
     out_hide = render_markdown(p, synthesis=synth, show_refs=False)
     assert "- did a thing" in out_hide
     assert "(refs:" not in out_hide  # suffix dropped by default
+
+
+# ---------------------------------------------------------------------------
+# Public-helper extraction regression
+# ---------------------------------------------------------------------------
+
+
+def test_render_markdown_regression_multi_group_behavior_preserving():
+    """Regression: render_markdown output is byte-identical after public-helper extraction.
+
+    Done-when: 'render_markdown(portfolio, ...) returns byte-identical output before
+    and after the public-helper extraction.'
+
+    Pins the complete rendered string so any behaviour change in claim_group,
+    count_repos_from_refs, or stack_languages is immediately caught.
+
+    Discriminating assertion: also verifies that the three public helpers introduced
+    by task-019 exist in portfolio.render and are callable. The pre-task-019 module
+    only had private underscore-prefixed versions (_claim_group, _count_repos,
+    _stack_summary), so this assertion fails against pre-change code.
+    """
+    import portfolio.render as _pr
+
+    # Discriminating: public helpers must exist as callables in portfolio.render.
+    assert callable(getattr(_pr, "claim_group", None)), "portfolio.render.claim_group must be a public callable"
+    assert callable(getattr(_pr, "count_repos_from_refs", None)), (
+        "portfolio.render.count_repos_from_refs must be a public callable"
+    )
+    assert callable(getattr(_pr, "stack_languages", None)), "portfolio.render.stack_languages must be a public callable"
+
+    p = Portfolio(
+        subject="carol",
+        evidence=[
+            Evidence(kind="pr", ref="PR#1"),
+            Evidence(kind="file", ref="lib/auth.py"),
+        ],
+        claims=[
+            Claim(text="Python auth module", evidence_refs=["lib/auth.py"], confidence=0.9),
+            Claim(text="PR review", evidence_refs=["PR#1"], confidence=0.7),
+        ],
+    )
+    out = render_markdown(p)
+    # Exact byte-for-byte pin — any extraction-induced behaviour change will fail here.
+    _EXPECTED = (
+        "# Portfolio — carol\n"
+        "\n"
+        "> Portfolio for carol — 1 merged PRs across 1 repos.\n"
+        "\n"
+        "**1 merged PRs · 1 repos · Python**\n"
+        "\n"
+        "## Python\n"
+        "\n"
+        "### Python auth module\n"
+        "\n"
+        "- Confidence: 0.90\n"
+        "\n"
+        "---\n"
+        "\n"
+        "## Other\n"
+        "\n"
+        "### PR review\n"
+        "\n"
+        "- Confidence: 0.70\n"
+        "\n"
+        "---\n"
+    )
+    assert out == _EXPECTED

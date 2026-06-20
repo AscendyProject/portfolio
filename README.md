@@ -101,6 +101,24 @@ hallucinated refs are rejected by `resume.select.enforce_grounding` and never ap
 output. The `/resume` slash command is the interactive front door; `--top-n` (default 12)
 caps rendered bullets; `--out <file>` writes to a file instead of stdout.
 
+The rendered resume layout:
+
+- **Summary stat line** — a single line stating the number of selected contributions, the
+  count of distinct repos spanned by the selected claims, and the JD keyword coverage
+  fraction (`matched/total`). Computed deterministically from grounded evidence; no model
+  call.
+- **`## Experience`** — the selected claims grouped under `## <Stack>` subsections derived
+  from the majority file-extension language of each claim's file evidence (e.g. `## Python`,
+  `## Go`). Groups appear in descending claim count, with ascending alphabetical tiebreak;
+  `## Other` (claims citing only PR or non-file refs) always appears last. Within each group,
+  bullets appear in the same order as the JD-ranked selection.
+- **`## Skills`** — a comma-joined, alphabetically sorted list of detected stack languages
+  from the file evidence cited by the selected claims. Renders `_no stack detected_` when
+  the selected claims cite no file refs.
+- **`## Contact`** and **`## Education`** — literal fill-in placeholders
+  (`_Add your contact details._` / `_Add your education._`). Never fabricated from evidence
+  or from any model output.
+
 ### `/reference-check` command
 
 Run `python -m reference_check --source-type <type> --source <url> --author <handle>`

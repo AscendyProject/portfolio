@@ -9,6 +9,8 @@ No model, subprocess, or network call is made — stdlib and portfolio.model onl
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from portfolio.model import Portfolio
 from portfolio.synthesis import SynthesisResult
 from rating.profile import language_for_ref
@@ -32,8 +34,8 @@ def _escape(text: str) -> str:
     return "".join(result)
 
 
-def _count_repos(evidence: list) -> int:
-    """Count distinct repo identities across all evidence refs.
+def count_repos_from_refs(refs: Iterable[str]) -> int:
+    """Count distinct repo identities from an iterable of ref strings.
 
     Rules (deterministic, no model):
     - <owner>/<repo>#<n>  → identity = <owner>/<repo>
@@ -43,29 +45,23 @@ def _count_repos(evidence: list) -> int:
     """
     qualified: set[str] = set()
     has_unqualified = False
-
-    for ev in evidence:
-        ref = ev.ref
+    for ref in refs:
         if ref.startswith("http://") or ref.startswith("https://"):
             continue
         if "#" in ref and "/" in ref.split("#")[0]:
-            # <owner>/<repo>#<n>
             qualified.add(ref.split("#")[0])
         elif ":" in ref and "/" in ref.split(":")[0] and not ref.startswith("PR"):
-            # <owner>/<repo>:<path>
             qualified.add(ref.split(":")[0])
         else:
-            # bare path or PR#<n> — unqualified bucket
             has_unqualified = True
-
     return len(qualified) + (1 if has_unqualified else 0)
 
 
-def _stack_summary(evidence: list) -> str:
-    """Build the stack summary string from file evidence refs.
+def stack_languages(evidence: Iterable) -> set[str]:
+    """Return the set of distinct non-'other' language names from file evidence.
 
-    Collects distinct language names (excluding 'other'), sorts alphabetically,
-    and joins with ', '.  Returns 'no stack detected' when the list is empty.
+    Iterates over items with .kind and .ref attributes; only processes items
+    where .kind == 'file'.
     """
     langs: set[str] = set()
     for ev in evidence:
@@ -73,12 +69,10 @@ def _stack_summary(evidence: list) -> str:
             lang = language_for_ref(ev.ref)
             if lang != "other":
                 langs.add(lang)
-    if not langs:
-        return "no stack detected"
-    return ", ".join(sorted(langs))
+    return langs
 
 
-def _claim_group(claim, evidence_by_ref: dict) -> str:
+def claim_group(claim, evidence_by_ref: dict) -> str:
     """Determine the ## <Group> section for a single claim.
 
     Uses the majority language among the claim's file evidence refs.
@@ -96,15 +90,24 @@ def _claim_group(claim, evidence_by_ref: dict) -> str:
     if not lang_counts:
         return "Other"
 
-    # Remove 'other' bucket — it folds into the 'Other' group
     real_langs = {k: v for k, v in lang_counts.items() if k != "other"}
     if not real_langs:
         return "Other"
 
-    # Primary: highest count; secondary: ascending alphabetical (ASCII, case-sensitive).
     best_count = max(real_langs.values())
     candidates = sorted(k for k, v in real_langs.items() if v == best_count)
     return candidates[0]
+
+
+def _count_repos(evidence: list) -> int:
+    return count_repos_from_refs(e.ref for e in evidence)
+
+
+def _stack_summary(evidence: list) -> str:
+    langs = stack_languages(evidence)
+    if not langs:
+        return "no stack detected"
+    return ", ".join(sorted(langs))
 
 
 def _render_claim_block(claim, evidence_by_ref: dict, *, show_refs: bool = False) -> list[str]:
@@ -200,7 +203,7 @@ def render_markdown(portfolio: Portfolio, *, synthesis: SynthesisResult | None =
     # Assign each claim to a group.
     groups: dict[str, list] = {}
     for claim in portfolio.claims:
-        group = _claim_group(claim, evidence_by_ref)
+        group = claim_group(claim, evidence_by_ref)
         groups.setdefault(group, []).append(claim)
 
     # Group ordering: descending claim count, then ascending name. 'Other' always last.

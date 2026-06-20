@@ -56,6 +56,14 @@ Arguments (may be empty): `$ARGUMENTS`
    - the one-line **grounding summary** the CLI prints on stderr
      (`grounded: N  rejected: N  needs-confirmation: N`) so they can see how many
      drafted claims were dropped for lacking real evidence.
+   - The resume includes: a Summary stat line (contributions count, repo count, JD keyword
+     coverage as `matched/total`); an Experience section grouped by detected stack
+     (`## Python`, `## Go`, etc., with `## Other` last for claims citing only PR or
+     non-file refs); a Skills section listing the detected language stack sorted
+     alphabetically (or `_no stack detected_` when only PR refs are cited); and
+     `## Contact` / `## Education` placeholder sections containing literal fill-in markers
+     (`_Add your contact details._` / `_Add your education._`) — never fabricated
+     personal data.
 
 ## Hard rules
 
