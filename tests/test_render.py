@@ -893,10 +893,13 @@ def test_highlight_empty_refs_byte_identical_under_show_refs():
 
 
 def test_render_markdown_regression_multi_group_behavior_preserving():
-    """Regression: render_markdown output is structurally intact after public-helper extraction.
+    """Regression: render_markdown output is byte-identical after public-helper extraction.
 
     Done-when: 'render_markdown(portfolio, ...) returns byte-identical output before
     and after the public-helper extraction.'
+
+    Pins the complete rendered string so any behaviour change in claim_group,
+    count_repos_from_refs, or stack_languages is immediately caught.
     """
     p = Portfolio(
         subject="carol",
@@ -910,11 +913,28 @@ def test_render_markdown_regression_multi_group_behavior_preserving():
         ],
     )
     out = render_markdown(p)
-    # Structural invariants still hold after extraction
-    assert "# Portfolio — carol" in out
-    assert "## Python" in out
-    assert "## Other" in out
-    # Python group precedes Other
-    assert out.index("## Python") < out.index("## Other")
-    # Idempotent (byte-identical on repeat call)
-    assert out == render_markdown(p)
+    # Exact byte-for-byte pin — any extraction-induced behaviour change will fail here.
+    _EXPECTED = (
+        "# Portfolio — carol\n"
+        "\n"
+        "> Portfolio for carol — 1 merged PRs across 1 repos.\n"
+        "\n"
+        "**1 merged PRs · 1 repos · Python**\n"
+        "\n"
+        "## Python\n"
+        "\n"
+        "### Python auth module\n"
+        "\n"
+        "- Confidence: 0.90\n"
+        "\n"
+        "---\n"
+        "\n"
+        "## Other\n"
+        "\n"
+        "### PR review\n"
+        "\n"
+        "- Confidence: 0.70\n"
+        "\n"
+        "---\n"
+    )
+    assert out == _EXPECTED

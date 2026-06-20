@@ -339,7 +339,11 @@ def test_placeholders_contain_no_personal_data():
 
 
 def test_show_refs_false_zero_brackets_anywhere():
-    """Done-when: show_refs=False produces zero '[' and ']' characters in the entire document."""
+    """Done-when: show_refs=False produces zero '[' and ']' characters in the entire document.
+
+    Discriminating assertion: also verifies that the new-layout ## Experience section is
+    present, which would not appear in the pre-task-019 render_resume implementation.
+    """
     portfolio = Portfolio(
         subject="alice",
         evidence=[
@@ -359,10 +363,16 @@ def test_show_refs_false_zero_brackets_anywhere():
     out = render_resume(draft, show_refs=False)
     assert "[" not in out
     assert "]" not in out
+    # Task-019 new-layout check: ## Experience must be present (absent pre-task-019).
+    assert "## Experience" in out
 
 
 def test_show_refs_true_adds_inline_refs_to_bullets():
-    """Done-when: show_refs=True emits '- <claim text> [ref1, ref2]' format on per-claim bullets."""
+    """Done-when: show_refs=True emits '- <claim text> [ref1, ref2]' format on per-claim bullets.
+
+    Discriminating assertion: also verifies that the new-layout ## Experience section is
+    present, which would not appear in the pre-task-019 render_resume implementation.
+    """
     portfolio = Portfolio(
         subject="alice",
         evidence=[Evidence(kind="pr", ref="PR#1"), Evidence(kind="pr", ref="PR#2")],
@@ -377,6 +387,8 @@ def test_show_refs_true_adds_inline_refs_to_bullets():
     )
     draft = build_resume(portfolio, "built", top_n=5)
     out = render_resume(draft, show_refs=True)
+    # Task-019 new-layout check: ## Experience must be present (absent pre-task-019).
+    assert "## Experience" in out
     bullets = [ln for ln in out.splitlines() if ln.startswith("- ")]
     assert len(bullets) == 1
     assert "[" in bullets[0]
@@ -411,12 +423,20 @@ def test_empty_draft_exact_string_contract():
 
 
 def test_empty_draft_no_experience_or_skills_or_summary():
-    """Done-when: empty draft output contains no ## Summary, ## Experience, or ## Skills."""
+    """Done-when: empty draft output contains no ## Summary, ## Experience, or ## Skills,
+    but DOES contain the task-019 ## Contact and ## Education placeholder sections.
+
+    Discriminating assertions: ## Contact and ## Education are present (task-019 behaviour;
+    these headings would not appear in the pre-task-019 render_resume implementation).
+    """
     draft = ResumeDraft(subject="alice", selected=[])
     out = render_resume(draft)
     assert "## Summary" not in out
     assert "## Experience" not in out
     assert "## Skills" not in out
+    # Task-019 new-layout check: placeholder sections must be present (absent pre-task-019).
+    assert "## Contact" in out
+    assert "## Education" in out
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +445,12 @@ def test_empty_draft_no_experience_or_skills_or_summary():
 
 
 def test_determinism_non_empty_draft():
-    """Done-when: two successive render_resume calls on non-empty draft return byte-identical strings."""
+    """Done-when: two successive render_resume calls on non-empty draft return byte-identical strings.
+
+    Discriminating assertion: also verifies that the new-layout ## Experience section is
+    present in the deterministic output, which would not appear in the pre-task-019
+    render_resume implementation.
+    """
     portfolio = Portfolio(
         subject="alice",
         evidence=[Evidence(kind="file", ref="main.py"), Evidence(kind="pr", ref="PR#1")],
@@ -439,14 +464,25 @@ def test_determinism_non_empty_draft():
         ],
     )
     draft = build_resume(portfolio, "built feature", top_n=5)
-    assert render_resume(draft) == render_resume(draft)
+    out = render_resume(draft)
+    # Task-019 new-layout check: ## Experience must be present (absent pre-task-019).
+    assert "## Experience" in out
+    assert out == render_resume(draft)
     assert render_resume(draft, show_refs=True) == render_resume(draft, show_refs=True)
 
 
 def test_determinism_empty_draft():
-    """Done-when: two successive render_resume calls on empty draft return byte-identical strings."""
+    """Done-when: two successive render_resume calls on empty draft return byte-identical strings.
+
+    Discriminating assertion: also verifies that the task-019 ## Contact placeholder is
+    present in the deterministic output, which would not appear in the pre-task-019
+    render_resume implementation.
+    """
     draft = ResumeDraft(subject="alice", selected=[])
-    assert render_resume(draft) == render_resume(draft)
+    out = render_resume(draft)
+    # Task-019 new-layout check: ## Contact placeholder must be present (absent pre-task-019).
+    assert "## Contact" in out
+    assert out == render_resume(draft)
 
 
 # ---------------------------------------------------------------------------
