@@ -26,6 +26,64 @@ from portfolio.sources import SourceRequest, UnsupportedSourceError, known_sourc
 from portfolio.web import fetch_html
 
 
+def _run_merge(argv: list[str]) -> int:
+    """Handle `python -m portfolio merge <a.json> <b.json> ... --subject <s> --out <f>`."""
+    from portfolio.store import PortfolioStoreError, merge_portfolios, portfolio_from_json, portfolio_to_json
+
+    parser = argparse.ArgumentParser(prog="python -m portfolio merge")
+    parser.add_argument("inputs", nargs="*", metavar="INPUT", help="input Portfolio JSON paths (>=2 required)")
+    parser.add_argument("--subject", default=None, help="canonical subject name for the merged portfolio")
+    parser.add_argument("--out", default=None, help="write merged Portfolio JSON to this file")
+    args = parser.parse_args(argv)
+
+    if len(args.inputs) < 2:
+        print(f"merge requires at least 2 input paths, got {len(args.inputs)}", file=sys.stderr)
+        return 2
+
+    if args.subject is None:
+        print("--subject is required", file=sys.stderr)
+        return 2
+    if not args.subject.strip():
+        print("--subject must not be empty or whitespace-only", file=sys.stderr)
+        return 2
+
+    if args.out is None:
+        print("--out is required", file=sys.stderr)
+        return 2
+
+    portfolios = []
+    for path_str in args.inputs:
+        path = Path(path_str)
+        if not path.exists():
+            print(f"input file not found: {path_str!r}", file=sys.stderr)
+            return 2
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            print(f"cannot read {path_str!r}: {exc}", file=sys.stderr)
+            return 2
+        try:
+            p = portfolio_from_json(text)
+        except PortfolioStoreError as exc:
+            print(f"invalid portfolio JSON in {path_str!r}: {exc}", file=sys.stderr)
+            return 2
+        portfolios.append(p)
+
+    try:
+        merged = merge_portfolios(portfolios, subject=args.subject)
+    except PortfolioStoreError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    try:
+        Path(args.out).write_text(portfolio_to_json(merged), encoding="utf-8")
+    except OSError as exc:
+        print(f"failed to write --out file {args.out!r}: {exc}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m portfolio",
@@ -63,6 +121,11 @@ def run(
     synthesis_runner defaults to None so existing tests that inject only runner=
     continue to work (synthesis is skipped when synthesis_runner is None).
     """
+    # `merge` is a positional subcommand; detect it before the main parser runs
+    # (the main parser has --source-type required, which would reject merge args).
+    if argv and argv[0] == "merge":
+        return _run_merge(argv[1:])
+
     args = _build_parser().parse_args(argv)
 
     # Resolve the source (validation/parse only — no extraction yet).
