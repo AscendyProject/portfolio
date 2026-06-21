@@ -6,6 +6,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-21
+
+Readability and reach: output is cleaner by default, resume gets a standard
+layout, portfolios merge across accounts, and every command can speak Korean.
+
+### Added
+- **Multilingual output** — `--lang en|ko` on all five commands; both LLM-written
+  prose and deterministic UI strings are localized. When `--lang` is omitted,
+  `resume`/`fit` auto-detect the JD's language; a Unicode-aware JD tokenizer makes
+  non-ASCII (e.g. Korean) JDs produce real keywords. Grounding is unchanged —
+  refs stay language-neutral (#33).
+- **`portfolio merge`** — union two or more saved Portfolio JSONs (e.g. corporate
+  + personal accounts) into one grounded Portfolio, re-grounded on merge, with a
+  guard against silently coalescing bare cross-source refs (#32, issue #30).
+
+### Changed
+- **Grounding refs hidden by default** — rendered output omits inline `[refs]` for
+  readability; pass `--show-refs` to reveal them (#29).
+- **Resume standard layout** — `/resume` renders a Summary stat line, Experience
+  grouped by stack, and a Skills section instead of a flat claim list (#31).
+
 ## [0.2.0] — 2026-06-19
 
 First tagged release. The grounded engine now backs five commands, gathers
@@ -40,5 +61,6 @@ anonymize private repos before sharing.
 - Dropped the `ascendy-` prefix; the harness/repo is now `portfolio` (#8).
 - Upgraded the vendored redteam harness to 0.4.0 (#21).
 
-[Unreleased]: https://github.com/AscendyProject/portfolio/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/AscendyProject/portfolio/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/AscendyProject/portfolio/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/AscendyProject/portfolio/releases/tag/v0.2.0
