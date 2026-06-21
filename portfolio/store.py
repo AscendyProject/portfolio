@@ -7,6 +7,7 @@ functions anywhere in this module.
 from __future__ import annotations
 
 import json
+import re
 
 from portfolio.model import Claim, Evidence, Portfolio
 
@@ -140,3 +141,88 @@ def portfolio_from_json(text: str) -> Portfolio:
     except json.JSONDecodeError as exc:
         raise PortfolioStoreError(f"invalid JSON: {exc}") from exc
     return portfolio_from_dict(data)
+
+
+# ---------------------------------------------------------------------------
+# Merge
+# ---------------------------------------------------------------------------
+
+# Bare PR ref pattern: "PR#<digits>" with no owner/repo prefix.
+_BARE_PR_RE = re.compile(r"^PR#\d+$")
+
+
+def _check_bare_refs(portfolio: Portfolio, label: str) -> None:
+    """Raise PortfolioStoreError if portfolio has any bare (non-repo-qualified) evidence ref.
+
+    Two single-repo portfolios could each carry a "PR#1" meaning different PRs;
+    silently collapsing them would destroy grounding. Rejection is the committed
+    strategy (PR-002): no namespacing, no ref rewriting.
+    """
+    for e in portfolio.evidence:
+        if e.kind == "pr" and _BARE_PR_RE.match(e.ref):
+            raise PortfolioStoreError(
+                f"input portfolio {label} contains bare PR ref {e.ref!r}; "
+                "merge inputs must use repo-qualified refs (e.g. 'owner/repo#1')"
+            )
+        if e.kind == "file" and ":" not in e.ref:
+            raise PortfolioStoreError(
+                f"input portfolio {label} contains bare file ref {e.ref!r}; "
+                "merge inputs must use repo-qualified file refs (e.g. 'owner/repo:path/to/file')"
+            )
+
+
+def merge_portfolios(portfolios: list[Portfolio], *, subject: str) -> Portfolio:
+    """Merge two or more Portfolio objects into a single grounded Portfolio.
+
+    The ``subject`` argument is authoritative: it becomes the merged portfolio's
+    subject regardless of the subjects of the input portfolios (the multi-account
+    case, e.g. alice-corp + alice-personal → "Alice Smith").
+
+    Evidence is deduped on (kind, ref); first-seen entry wins.  Claims from all
+    inputs are unioned; the grounding gate is re-applied against the merged
+    evidence set and any claim whose cited ref is absent is dropped.
+
+    Raises PortfolioStoreError when:
+    - ``portfolios`` is empty
+    - ``subject`` is empty or whitespace-only
+    - any input portfolio contains a bare (non-repo-qualified) evidence ref
+    """
+    if not subject or not subject.strip():
+        raise PortfolioStoreError("subject must be a non-empty, non-whitespace string")
+    if not portfolios:
+        raise PortfolioStoreError("portfolios must be a non-empty list")
+
+    # Guard: all inputs must use repo-qualified refs before any merge starts
+    for i, p in enumerate(portfolios):
+        _check_bare_refs(p, str(i))
+
+    # Union evidence by (kind, ref), preserving first-seen order
+    seen_keys: set[tuple[str, str]] = set()
+    merged_evidence: list[Evidence] = []
+    for p in portfolios:
+        for e in p.evidence:
+            key = (e.kind, e.ref)
+            if key not in seen_keys:
+                seen_keys.add(key)
+                merged_evidence.append(e)
+
+    # Collect all claims; copy to avoid mutating the caller's Portfolio objects
+    all_claims: list[Claim] = [
+        Claim(
+            text=c.text,
+            evidence_refs=list(c.evidence_refs),
+            confidence=c.confidence,
+            needs_user_confirmation=c.needs_user_confirmation,
+            grounded=c.grounded,
+        )
+        for p in portfolios
+        for c in p.claims
+    ]
+
+    # Re-run the grounding gate; drop any claim whose refs aren't in merged evidence
+    from portfolio.grounding import check_claims  # deferred — grounding imports model, not store
+
+    result = check_claims(all_claims, merged_evidence)
+    final_claims = result.grounded + result.needs_confirmation
+
+    return Portfolio(subject=subject, evidence=merged_evidence, claims=final_claims)

@@ -204,6 +204,52 @@ The grounding gate is re-applied on load: any claim whose cited evidence ref is
 absent from the saved evidence list is dropped. `--author` is accepted but ignored
 for `--source-type portfolio`; the subject stored in the JSON file always wins.
 
+### `merge` — combine portfolios from multiple accounts
+
+```bash
+python -m portfolio merge a.json b.json [c.json ...] --subject "Alice Smith" --out merged.json
+```
+
+Combines two or more previously saved Portfolio JSON files into a single grounded
+Portfolio without any `gh` calls or LLM invocation.  The canonical use-case is
+merging a developer's work across separate GitHub accounts (e.g. `alice-corp` +
+`alice-personal` → `"Alice Smith"`):
+
+```bash
+# Step 1: emit portfolios from each account separately
+python -m portfolio --source-type github-author --author alice-corp \
+  --emit-portfolio corp.json
+
+python -m portfolio --source-type github-author --author alice-personal \
+  --emit-portfolio personal.json
+
+# Step 2: merge into one grounded portfolio
+python -m portfolio merge corp.json personal.json \
+  --subject "Alice Smith" --out merged.json
+```
+
+**What the merge does:**
+
+- Evidence is deduplicated on the `(kind, ref)` key across all inputs; the
+  first-seen entry wins when two inputs carry the same ref.
+- Claims from all inputs are unioned.  The grounding gate is re-applied against
+  the merged evidence set; any claim whose cited ref is absent from the merged
+  evidence is **dropped** (not merely flagged).
+- The `--subject` argument is authoritative: it becomes the merged portfolio's
+  `subject` regardless of the individual files' subjects.
+
+**Bare-ref requirement (important):**
+
+`merge` inputs must use **repo-qualified** evidence refs.  A bare `PR#<n>` ref
+(kind `pr`) or a file path without a `owner/repo:` prefix (kind `file`) across
+two portfolios could mean different artifacts, so the merge **rejects** any
+input that contains such refs with a clear error naming the offending file.
+
+Portfolios produced by `--source-type github-author` use repo-qualified refs by
+default and are safe merge inputs.  Portfolios produced from a single repo via
+`--source-type github` may contain bare refs (`PR#1`, `src/main.py`) and will
+need to be re-extracted with `github-author` before merging.
+
 ### `github-author` — author-wide evidence
 
 ```bash
