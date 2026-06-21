@@ -15,7 +15,9 @@ import argparse
 import sys
 from pathlib import Path
 
+import portfolio.i18n as i18n
 from portfolio.extract import extract_merged_prs
+from portfolio.i18n import detect_language
 from portfolio.jd_source import JDFetchError, JDFileReadError, JDInvalidURLError, load_jd
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
@@ -42,6 +44,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--show-refs", action="store_true", default=False, help="include grounding refs in rendered output"
+    )
+    parser.add_argument(
+        "--lang", choices=tuple(i18n.LANGS), default=None, help="output language code (default: auto-detect from JD)"
     )
     return parser
 
@@ -75,6 +80,9 @@ def run(
         print(f"failed to fetch --jd URL {args.jd!r}: {exc}", file=sys.stderr)
         return 2
 
+    # Resolve language: explicit --lang wins; otherwise detect from JD text.
+    lang = args.lang if args.lang is not None else detect_language(jd_text)
+
     # Resolve the source (validation/parse only — no extraction yet).
     try:
         resolved = resolve_source(
@@ -98,6 +106,7 @@ def run(
             mask_private=args.mask_private,
             synthesis_runner=None,
             visibility_lookup=visibility_lookup,
+            lang=lang,
         )
     except Exception as exc:
         print(f"failed to build resume: {exc}", file=sys.stderr)
@@ -107,7 +116,7 @@ def run(
         print(f"masked {n_masked} private repo(s)", file=sys.stderr)
 
     draft = build_resume(result.portfolio, jd_text, args.top_n)
-    markdown = render_resume(draft, show_refs=args.show_refs)
+    markdown = render_resume(draft, show_refs=args.show_refs, lang=lang)
 
     grounding = result.grounding
     print(

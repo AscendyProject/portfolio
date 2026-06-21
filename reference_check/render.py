@@ -6,13 +6,12 @@ No model, subprocess, network, or file I/O is performed here.
 
 from __future__ import annotations
 
+from portfolio.i18n import LANGS
 from portfolio.render import _escape
 from reference_check.letter import LetterDraft
 
-_INSUFFICIENT_NOTICE = "_insufficient grounded evidence — letter not generated_"
 
-
-def render_letter(draft: LetterDraft, *, show_refs: bool = False) -> str:
+def render_letter(draft: LetterDraft, *, show_refs: bool = False, lang: str = "en") -> str:
     """Render a LetterDraft to a Markdown string.
 
     Output structure:
@@ -31,17 +30,18 @@ def render_letter(draft: LetterDraft, *, show_refs: bool = False) -> str:
     output), emits the deterministic insufficient-evidence notice instead of
     letter body — never fabricates content.
     """
+    strings = LANGS[lang]
     lines: list[str] = []
 
-    lines.append(f"# Recommendation Letter — {_escape(draft.subject)}")
+    lines.append(f"# {strings['title_letter']} — {_escape(draft.subject)}")
     lines.append("")
 
     if not draft.paragraphs:
-        lines.append(_INSUFFICIENT_NOTICE)
+        lines.append(strings["insufficient_evidence"])
         lines.append("")
         return "\n".join(lines)
 
-    lines.append("Dear Hiring Manager,")
+    lines.append(strings["letter_greeting"])
     lines.append("")
 
     for para in draft.paragraphs:
@@ -51,7 +51,7 @@ def render_letter(draft: LetterDraft, *, show_refs: bool = False) -> str:
             lines.append(f"*[{refs_str}]*")
         lines.append("")
 
-    lines.append("Sincerely,")
+    lines.append(strings["letter_closing"])
     lines.append("")
 
     return "\n".join(lines)

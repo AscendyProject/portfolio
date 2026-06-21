@@ -7,10 +7,17 @@ from __future__ import annotations
 
 from fit.grade import GradeResult
 from fit.score import ScoreResult
+from portfolio.i18n import LANGS
 from portfolio.render import _escape
 
 
-def render_fit(score_result: ScoreResult, grade_result: GradeResult, *, show_refs: bool = False) -> str:
+def render_fit(
+    score_result: ScoreResult,
+    grade_result: GradeResult,
+    *,
+    show_refs: bool = False,
+    lang: str = "en",
+) -> str:
     """Render the /fit analysis as a Markdown string.
 
     Contains:
@@ -23,6 +30,7 @@ def render_fit(score_result: ScoreResult, grade_result: GradeResult, *, show_ref
 
     Makes no model, subprocess, or network call.
     """
+    strings = LANGS[lang]
     lines: list[str] = []
 
     grade = score_result.grade
@@ -30,15 +38,15 @@ def render_fit(score_result: ScoreResult, grade_result: GradeResult, *, show_ref
     band = score_result.band
     coverage_pct = score_result.coverage_pct
 
-    lines.append(f"# Fit Assessment — Grade {_escape(grade)}")
+    lines.append(f"# {strings['title_fit']} — {strings['grade_label']} {_escape(grade)}")
     lines.append("")
-    lines.append(f"**Score:** {score} / 100  (band: {band[0]}–{band[1]})")
+    lines.append(f"**{strings['score_label']}:** {score} / 100  ({strings['band_label']}: {band[0]}–{band[1]})")
     lines.append("")
-    lines.append(f"**JD Coverage:** {coverage_pct:.0f}%")
+    lines.append(f"**{strings['jd_coverage_label']}:** {coverage_pct:.0f}%")
     lines.append("")
 
     # Covered requirements
-    lines.append("## Covered Requirements")
+    lines.append(f"## {strings['section_covered']}")
     lines.append("")
     if score_result.covered:
         for kw in sorted(score_result.covered.keys()):
@@ -49,21 +57,21 @@ def render_fit(score_result: ScoreResult, grade_result: GradeResult, *, show_ref
             else:
                 lines.append(f"- `{_escape(kw)}`")
     else:
-        lines.append("_none_")
+        lines.append(strings["none_notice"])
     lines.append("")
 
     # Gaps
-    lines.append("## Gaps")
+    lines.append(f"## {strings['section_gaps']}")
     lines.append("")
     if score_result.gaps:
         for kw in sorted(score_result.gaps):
             lines.append(f"- `{_escape(kw)}`")
     else:
-        lines.append("_none_")
+        lines.append(strings["none_notice"])
     lines.append("")
 
     # Grounded reasoning
-    lines.append("## Grounded Reasoning")
+    lines.append(f"## {strings['section_grounded_reasoning']}")
     lines.append("")
     if grade_result.reasoning:
         for bullet in grade_result.reasoning:
@@ -75,19 +83,13 @@ def render_fit(score_result: ScoreResult, grade_result: GradeResult, *, show_ref
             else:
                 lines.append(f"- {text}")
     else:
-        lines.append("_no grounded reasoning provided_")
+        lines.append(strings["no_grounded_reasoning"])
     lines.append("")
 
     # Grade→band rubric table
-    lines.append("## Grade Rubric")
+    lines.append(f"## {strings['section_grade_rubric']}")
     lines.append("")
-    lines.append("| Grade | Coverage% | Score Band |")
-    lines.append("|-------|-----------|------------|")
-    lines.append("| S     | ≥90%      | 96–100     |")
-    lines.append("| A     | ≥75%      | 85–95      |")
-    lines.append("| B     | ≥55%      | 70–84      |")
-    lines.append("| C     | ≥35%      | 55–69      |")
-    lines.append("| D     | <35%      | 0–54       |")
+    lines.append(strings["fit_rubric"])
     lines.append("")
 
     return "\n".join(lines)

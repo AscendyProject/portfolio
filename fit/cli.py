@@ -16,10 +16,12 @@ import argparse
 import sys
 from pathlib import Path
 
+import portfolio.i18n as i18n
 from fit.grade import GraderRunner, bounded_grade, default_grader_runner
 from fit.render import render_fit
 from fit.score import score_fit
 from portfolio.extract import extract_merged_prs
+from portfolio.i18n import detect_language
 from portfolio.jd_source import JDFetchError, JDFileReadError, JDInvalidURLError, load_jd
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
@@ -46,6 +48,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--show-refs", action="store_true", default=False, help="include grounding refs in rendered output"
+    )
+    parser.add_argument(
+        "--lang", choices=tuple(i18n.LANGS), default=None, help="output language code (default: auto-detect from JD)"
     )
     return parser
 
@@ -83,6 +88,9 @@ def run(
         print(f"failed to fetch --jd URL {args.jd!r}: {exc}", file=sys.stderr)
         return 2
 
+    # Resolve language: explicit --lang wins; otherwise detect from JD text.
+    lang = args.lang if args.lang is not None else detect_language(jd_text)
+
     # Resolve the source (validation/parse only — no extraction yet).
     try:
         resolved = resolve_source(
@@ -105,6 +113,7 @@ def run(
             mask_private=args.mask_private,
             synthesis_runner=None,
             visibility_lookup=visibility_lookup,
+            lang=lang,
         )
     except Exception as exc:
         print(f"failed to build portfolio: {exc}", file=sys.stderr)
@@ -117,7 +126,7 @@ def run(
     score_result = score_fit(result.portfolio, jd_text)
 
     # Bounded agent grade (grader_runner called with temperature=0)
-    grade_result = bounded_grade(result.portfolio, score_result.grade, score_result.band, grader_runner)
+    grade_result = bounded_grade(result.portfolio, score_result.grade, score_result.band, grader_runner, lang=lang)
 
     # Post-model scrub: replace any private owner/repo the grader emitted
     if args.mask_private and result.relabel:
@@ -137,7 +146,7 @@ def run(
         ]
         grade_result = _GradeResult(score=grade_result.score, reasoning=scrubbed_reasoning)
 
-    markdown = render_fit(score_result, grade_result, show_refs=args.show_refs)
+    markdown = render_fit(score_result, grade_result, show_refs=args.show_refs, lang=lang)
 
     # Grounding summary → stderr only
     grounding = result.grounding

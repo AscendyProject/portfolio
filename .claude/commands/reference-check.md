@@ -1,6 +1,6 @@
 ---
 description: Generate a grounded recommendation letter from a GitHub repo or a blog/article URL (runs python -m reference_check).
-argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] [--mask-private] [--out <file>]"
+argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] [--lang en|ko] [--mask-private] [--out <file>]"
 ---
 
 The user wants to generate a **grounded** recommendation letter — every paragraph
@@ -25,6 +25,9 @@ Arguments (may be empty): `$ARGUMENTS`
      for web, or the path to a `.json` file for portfolio.
    - **author** — the GitHub handle of the developer being recommended (github /
      github-author), or the subject the letter is for (web). Not used for `portfolio`.
+   - optionally **--lang `en`|`ko`** to set the output language for the rendered
+     Markdown letter (UI strings and LLM prose). Defaults to `en` when omitted.
+     Supported: `en` (English), `ko` (Korean).
    - optionally **--out <file>** if the user wants the Markdown written to a file
      instead of shown inline.
    - optionally **--mask-private** to anonymize private GitHub repo names in the output

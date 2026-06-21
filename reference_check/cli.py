@@ -15,6 +15,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import portfolio.i18n as i18n
 from portfolio.extract import extract_merged_prs
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
@@ -40,6 +41,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--show-refs", action="store_true", default=False, help="include grounding refs in rendered output"
     )
+    parser.add_argument("--lang", choices=tuple(i18n.LANGS), default=None, help="output language code (default: en)")
     return parser
 
 
@@ -59,6 +61,7 @@ def run(
     the letter composition step.
     """
     args = _build_parser().parse_args(argv)
+    lang = args.lang or "en"
 
     # Resolve the source (validation/parse only — no extraction yet).
     try:
@@ -82,6 +85,7 @@ def run(
             mask_private=args.mask_private,
             synthesis_runner=None,
             visibility_lookup=visibility_lookup,
+            lang=lang,
         )
     except Exception as exc:
         print(f"failed to build portfolio: {exc}", file=sys.stderr)
@@ -92,7 +96,7 @@ def run(
 
     # Compose grounded letter from the portfolio.
     try:
-        draft = build_letter(result.portfolio, runner)
+        draft = build_letter(result.portfolio, runner, lang=lang)
     except Exception as exc:
         print(f"failed to build letter: {exc}", file=sys.stderr)
         return 1
@@ -120,7 +124,7 @@ def run(
             rejected_paragraphs=draft.rejected_paragraphs,
         )
 
-    markdown = render_letter(draft, show_refs=args.show_refs)
+    markdown = render_letter(draft, show_refs=args.show_refs, lang=lang)
 
     # Grounding summary on stderr only.
     grounding = result.grounding

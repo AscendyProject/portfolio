@@ -1,6 +1,6 @@
 ---
 description: Generate a grounded resume from a GitHub repo or a blog/article URL and a job description (runs python -m resume).
-argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] --jd <path-or-url> [--top-n N] [--mask-private] [--out <file>]"
+argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] --jd <path-or-url> [--lang en|ko] [--top-n N] [--mask-private] [--out <file>]"
 ---
 
 The user wants to generate a **grounded** resume — every bullet traced to real
@@ -25,6 +25,10 @@ Arguments (may be empty): `$ARGUMENTS`
      github-author), or the subject the resume is for (web). Not used for `portfolio`.
    - **jd path or URL** — filesystem path to a plain-text job description file, or an `http(s)` URL to a job posting page (required). When a URL is supplied the page is fetched and its article text is used as the JD.
    - optionally **--top-n N** to cap the number of rendered bullets (default: 12).
+   - optionally **--lang `en`|`ko`** to set the output language. When omitted, the
+     language is auto-detected from the JD text (Hangul-dominant → `ko`, Latin-dominant
+     → `en`). An explicit `--lang` always wins over auto-detection.
+     Supported: `en` (English), `ko` (Korean).
    - optionally **--out <file>** if the user wants the Markdown written to a file
      instead of shown inline.
    - optionally **--mask-private** to anonymize private GitHub repo names in the output

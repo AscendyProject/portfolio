@@ -59,11 +59,18 @@ STOPWORDS: frozenset[str] = frozenset(
 def jd_keywords(jd_text: str) -> set[str]:
     """Tokenize a plain-text job description into a normalised keyword set.
 
-    Steps: lowercase → split on non-alphanumerics → drop stopwords → drop empty
-    tokens. Returns an empty set for empty/whitespace-only input.
+    Tokenization rule: split on any character that is not a Unicode letter
+    (unicodedata.category L*) and not a Unicode digit (category N*).
+    Uses re.findall(r"[^\\W_]+", text, re.UNICODE) which matches Unicode word
+    chars minus underscores (i.e. letters and digits only). Lowercases via
+    str.lower() (Latin letters are case-folded; Korean is caseless and passes
+    through unchanged). Drops tokens in STOPWORDS; drops empty tokens.
+
+    Behaviour on pure-ASCII English input is byte-identical to the prior
+    implementation (re.split(r"[^a-z0-9]+", text.lower())).
     """
-    tokens = re.split(r"[^a-z0-9]+", jd_text.lower())
-    return {t for t in tokens if t and t not in STOPWORDS}
+    tokens = re.findall(r"[^\W_]+", jd_text, re.UNICODE)
+    return {t.lower() for t in tokens if t.lower() not in STOPWORDS}
 
 
 def _claim_tokens(claim: Claim) -> set[str]:

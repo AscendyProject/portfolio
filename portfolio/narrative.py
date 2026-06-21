@@ -11,13 +11,14 @@ import json
 import subprocess
 from collections.abc import Callable
 
+from .i18n import language_name
 from .model import Claim, Evidence
 
 # A runner takes a prompt and returns the model's raw text response.
 Runner = Callable[[str], str]
 
 
-def build_prompt(evidence: list[Evidence], max_claims: int) -> str:
+def build_prompt(evidence: list[Evidence], max_claims: int, lang: str = "en") -> str:
     """Strict prompt: list the ALLOWED evidence refs and require the model to cite
     only those, by exact ref string, in strict JSON. Pure / testable."""
     lines: list[str] = []
@@ -42,7 +43,8 @@ def build_prompt(evidence: list[Evidence], max_claims: int) -> str:
         f"Write up to {max_claims} concrete contribution claims. Output STRICT JSON only — "
         "a list of objects with keys: text (string), evidence_refs (list of exact ref "
         "strings from above), confidence (0..1), needs_user_confirmation (bool). "
-        "No prose, no code fences, JSON array only."
+        "No prose, no code fences, JSON array only.\n\n"
+        f"Write all prose in {language_name(lang)}."
     )
 
 
@@ -79,10 +81,10 @@ def parse_claims(model_text: str) -> list[Claim]:
     return [c for c in claims if c.text]
 
 
-def narrate(evidence: list[Evidence], runner: Runner, max_claims: int = 12) -> list[Claim]:
+def narrate(evidence: list[Evidence], runner: Runner, max_claims: int = 12, lang: str = "en") -> list[Claim]:
     """Ask the model (via `runner`) for claims over the evidence, then parse them.
     Returns UN-grounded claims — the caller must run the grounding gate next."""
-    return parse_claims(runner(build_prompt(evidence, max_claims)))
+    return parse_claims(runner(build_prompt(evidence, max_claims, lang)))
 
 
 def run_claude(prompt: str) -> str:

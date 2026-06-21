@@ -322,6 +322,47 @@ The stderr `grounded: N  rejected: N  needs-confirmation: N` summary is emitted 
 regardless of `--show-refs`. The two flags compose: `--show-refs --mask-private` shows refs in
 their anonymized `private-repo-N` form.
 
+### `--lang` — multilingual output (en / ko)
+
+All five CLIs accept `--lang <code>` to render the Markdown document in a target language.
+Supported codes: `en` (English, the default), `ko` (Korean).
+
+```bash
+python -m portfolio     --source-type github --source <url> --author <handle> --lang ko
+python -m resume        --source-type github --source <url> --author <handle> --jd jd.txt --lang ko
+python -m fit           --source-type github --source <url> --author <handle> --jd jd.txt --lang ko
+python -m rating        --source-type github --source <url> --author <handle> --lang ko
+python -m reference_check --source-type github --source <url> --author <handle> --lang ko
+```
+
+**What is localized:** all deterministic UI strings in the rendered Markdown document (titles,
+section headings, labels, placeholders, notices) and all LLM-written prose surfaces (claim
+narrative, synthesis headline and highlights, reasoning bullets, and recommendation letter
+paragraphs) — the model is instructed to write in the target language. Evidence ref tokens
+(`owner/repo#n`), file paths, repo names, and data pulled from `gh` are language-neutral and
+are never translated.
+
+**What is NOT localized:** argparse `--help`/usage text, Python exception messages, exit-2
+error strings, and operational stderr diagnostics (grounding-gate notices, `--mask-private`
+notices) stay in English regardless of `--lang`.
+
+**JD language auto-detect (`resume` / `fit` only):** when `--lang` is omitted, `resume` and
+`fit` call a deterministic Unicode-range heuristic on the loaded JD text (Hangul syllables →
+`ko`, Latin letters → `en`, dominant script wins, ties → `en`, empty → `en`) and use the
+detected language automatically. An explicit `--lang` always wins over auto-detection.
+`portfolio`, `rating`, and `reference_check` have no JD input and default to `en`.
+
+**Stored-portfolio note:** re-rendering a stored portfolio JSON (`--source-type portfolio`)
+in a new `--lang` re-translates the UI strings and instructs the model to write new prose in
+the target language. The stored `Claim.text` values (the narration already written and saved
+in the JSON) are not re-translated; they appear as the model originally wrote them. To get
+fully localized claim text, run the full pipeline (`--source-type github` etc.) with `--lang`.
+
+**Extensibility:** adding a new language is a single entry in `portfolio/i18n.py`'s `LANGS`
+table (UI string dict + `"name"` key for the LLM prompt instruction). The `--lang` choices
+on all five CLIs are derived from that table at parser-construction time, so no other code
+changes are needed.
+
 ## Dev
 
 ```bash

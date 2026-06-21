@@ -18,6 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import portfolio.i18n as i18n
 from portfolio.extract import extract_merged_prs
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
@@ -63,6 +64,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--show-refs", action="store_true", default=False, help="include grounding refs in rendered output"
     )
+    parser.add_argument("--lang", choices=tuple(i18n.LANGS), default=None, help="output language code (default: en)")
     return parser
 
 
@@ -82,6 +84,7 @@ def run(
     services, but tests pass fakes so no live service is required.
     """
     args = _build_parser().parse_args(argv)
+    lang = args.lang or "en"
 
     # Resolve the source (validation/parse only — no extraction yet).
     try:
@@ -105,6 +108,7 @@ def run(
             mask_private=args.mask_private,
             synthesis_runner=None,
             visibility_lookup=visibility_lookup,
+            lang=lang,
         )
     except Exception as exc:
         print(f"failed to build portfolio: {exc}", file=sys.stderr)
@@ -118,7 +122,7 @@ def run(
 
     # Bounded agent grading (injectable grader_runner, temperature=0).
     try:
-        grade_result = grade(result.portfolio, profile_result, grader_runner)
+        grade_result = grade(result.portfolio, profile_result, grader_runner, lang=lang)
     except Exception as exc:
         print(f"failed to grade: {exc}", file=sys.stderr)
         return 1
@@ -145,7 +149,7 @@ def run(
             reasoning=scrubbed_reasoning,
         )
 
-    markdown = render_rating(result.portfolio, profile_result, grade_result, show_refs=args.show_refs)
+    markdown = render_rating(result.portfolio, profile_result, grade_result, show_refs=args.show_refs, lang=lang)
 
     # Grounding summary on stderr only (never in the rendered body).
     grounding = result.grounding
