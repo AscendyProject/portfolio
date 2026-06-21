@@ -366,24 +366,50 @@ def test_cli_merge_happy_path(tmp_path, capsys):
     assert loaded.subject == "Alice"
 
 
-def test_cli_merge_non_merge_flow_unchanged(capsys):
-    """'Existing --source-type flow remains unchanged for non-merge invocations.'"""
-    import json as _json
-    from portfolio.model import Evidence as _Evidence
+def test_cli_merge_does_not_invoke_extraction_or_model(tmp_path):
+    """merge dispatch is PURE — it must not call the extractor (`gh`), runner
+    (model), or fetcher (network) seams. Injects raise-on-call seams and asserts
+    the merge still succeeds. Fails against pre-change code, which has no `merge`
+    path so `run(["merge", ...])` never produces a merged file (IR-002)."""
+    from portfolio.model import Claim, Evidence, Portfolio
+    from portfolio.store import portfolio_from_json, portfolio_to_json
 
-    def fake_extractor(*, repo, author):
-        return [_Evidence(kind="pr", ref="owner/repo#1", url="", detail="", context="")]
+    p1 = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="owner-a/repo#1")],
+        claims=[Claim(text="A", evidence_refs=["owner-a/repo#1"], confidence=0.9, grounded=True)],
+    )
+    p2 = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="owner-b/repo#2")],
+        claims=[Claim(text="B", evidence_refs=["owner-b/repo#2"], confidence=0.9, grounded=True)],
+    )
+    f1 = tmp_path / "a.json"
+    f1.write_text(portfolio_to_json(p1), encoding="utf-8")
+    f2 = tmp_path / "b.json"
+    f2.write_text(portfolio_to_json(p2), encoding="utf-8")
+    out = tmp_path / "merged.json"
 
-    def fake_runner(_prompt):
-        return _json.dumps([{"text": "Built thing", "evidence_refs": ["owner/repo#1"], "confidence": 0.9}])
+    def boom_extractor(**_kw):
+        raise AssertionError("extractor (gh) must not be called for merge")
+
+    def boom_runner(_prompt):
+        raise AssertionError("runner (model) must not be called for merge")
+
+    def boom_fetcher(_url):
+        raise AssertionError("fetcher (network) must not be called for merge")
 
     code = run(
-        ["--source-type", "github", "--source", "https://github.com/owner/repo", "--author", "alice"],
-        extractor=fake_extractor,
-        runner=fake_runner,
+        ["merge", str(f1), str(f2), "--subject", "alice", "--out", str(out)],
+        extractor=boom_extractor,
+        runner=boom_runner,
+        fetcher=boom_fetcher,
     )
-    capsys.readouterr()
     assert code == 0
+    assert out.exists()
+    merged = portfolio_from_json(out.read_text(encoding="utf-8"))
+    assert merged.subject == "alice"
+    assert len(merged.evidence) == 2  # union of two distinct repo-qualified refs
 
 
 # ---------------------------------------------------------------------------
