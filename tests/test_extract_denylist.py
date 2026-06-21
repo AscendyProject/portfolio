@@ -9,13 +9,13 @@ import json
 
 import pytest
 
-from portfolio.extract import _is_denied_ref, parse_authored_pr_evidence, parse_pr_evidence
+from portfolio.extract import _is_denied_path, parse_authored_pr_evidence, parse_pr_evidence
 from portfolio.model import Portfolio
 from rating.profile import profile
 
 
 # ---------------------------------------------------------------------------
-# Helper: _is_denied_ref — one positive + one negative per class
+# Helper: _is_denied_path — one positive + one negative per class
 # ---------------------------------------------------------------------------
 
 
@@ -24,7 +24,7 @@ class TestDeniedDirSegments:
     helper returns True for denied dir segments, False for authored paths."""
 
     @pytest.mark.parametrize(
-        "ref",
+        "path",
         [
             "target/classes/Foo.class",
             "build/libs/app.jar",
@@ -44,12 +44,12 @@ class TestDeniedDirSegments:
             "src/build/page.tsx",
         ],
     )
-    def test_denied_dir_segment_positive(self, ref: str) -> None:
+    def test_denied_dir_segment_positive(self, path: str) -> None:
         """Done-when (a): any segment exactly equals a denied dir name → denied."""
-        assert _is_denied_ref(ref) is True
+        assert _is_denied_path(path) is True
 
     @pytest.mark.parametrize(
-        "ref",
+        "path",
         [
             "src/app.py",
             "src/components/target.ts",  # "target.ts" ≠ "target"
@@ -59,132 +59,120 @@ class TestDeniedDirSegments:
             "src/main/java/com/example/Foo.java",
         ],
     )
-    def test_denied_dir_segment_negative(self, ref: str) -> None:
+    def test_denied_dir_segment_negative(self, path: str) -> None:
         """Done-when (a) over-match guard: filename segments that contain a
-        denied word but are not equal to it must NOT be denied."""
-        assert _is_denied_ref(ref) is False
+        denied word but are not equal to it must NOT be denied. Combined with a
+        positive denial so the test detects pre-change behavior (discriminating)."""
+        assert _is_denied_path(path) is False
+        assert _is_denied_path("target/classes/Foo.class") is True
 
 
 class TestDeniedExactFilenames:
     """Done-when: denied exact metadata filenames matched on FINAL segment."""
 
-    @pytest.mark.parametrize("ref", [".classpath", ".project", ".springBeans"])
-    def test_exact_filename_positive(self, ref: str) -> None:
+    @pytest.mark.parametrize("path", [".classpath", ".project", ".springBeans"])
+    def test_exact_filename_positive(self, path: str) -> None:
         """Done-when (b): final segment exactly matches → denied."""
-        assert _is_denied_ref(ref) is True
+        assert _is_denied_path(path) is True
 
     @pytest.mark.parametrize(
-        "ref",
+        "path",
         [
             "src/.classpath.bak",  # ends with something extra
             "src/project.py",  # similar but not exact
             "springBeans.xml",  # ".springBeans" ≠ "springBeans.xml"
         ],
     )
-    def test_exact_filename_negative(self, ref: str) -> None:
-        """Done-when (b): names that merely resemble denied names are kept."""
-        assert _is_denied_ref(ref) is False
+    def test_exact_filename_negative(self, path: str) -> None:
+        """Done-when (b): names that merely resemble denied names are kept.
+        Combined with a positive denial so the test fails pre-change."""
+        assert _is_denied_path(path) is False
+        assert _is_denied_path(".classpath") is True
 
 
 class TestDeniedImlSuffix:
     """Done-when: *.iml suffix denied on final segment."""
 
-    @pytest.mark.parametrize("ref", ["Module.iml", "teamTest.iml", "subdir/project.iml"])
-    def test_iml_suffix_positive(self, ref: str) -> None:
+    @pytest.mark.parametrize("path", ["Module.iml", "teamTest.iml", "subdir/project.iml"])
+    def test_iml_suffix_positive(self, path: str) -> None:
         """Done-when (b): final segment ends with .iml → denied."""
-        assert _is_denied_ref(ref) is True
+        assert _is_denied_path(path) is True
 
     def test_iml_suffix_negative(self) -> None:
-        """Done-when (b): .iml must be a SUFFIX, not substring in middle."""
-        assert _is_denied_ref("src/iml_utils.py") is False
+        """Done-when (b): .iml must be a SUFFIX, not substring in middle.
+        Combined with a positive denial so the test fails pre-change."""
+        assert _is_denied_path("src/iml_utils.py") is False
+        assert _is_denied_path("Module.iml") is True
 
 
 class TestDeniedMetaInfMaven:
     """Done-when: META-INF/maven consecutive segment pair denied at ANY depth."""
 
     @pytest.mark.parametrize(
-        "ref",
+        "path",
         [
             "module/META-INF/maven/com.example/foo/pom.properties",
             "subdir/nested/META-INF/maven/group/artifact/pom.xml",
             "target/META-INF/maven/com.example/teamTest/pom.xml",
         ],
     )
-    def test_meta_inf_maven_nested_positive(self, ref: str) -> None:
+    def test_meta_inf_maven_nested_positive(self, path: str) -> None:
         """Done-when: META-INF/maven denied even when nested deep in the path."""
-        assert _is_denied_ref(ref) is True
+        assert _is_denied_path(path) is True
 
     def test_meta_inf_services_negative(self) -> None:
         """Done-when: META-INF NOT immediately followed by maven → kept."""
-        assert _is_denied_ref("src/META-INF/services/foo") is False
+        assert _is_denied_path("src/META-INF/services/foo") is False
 
 
 class TestDeniedM2eWtp:
     """Done-when: m2e-wtp segment denied at ANY depth."""
 
     @pytest.mark.parametrize(
-        "ref",
+        "path",
         [
             "m2e-wtp/web-resources/META-INF/MANIFEST.MF",
             "nested/sub/m2e-wtp/web-resources/something",
         ],
     )
-    def test_m2e_wtp_nested_positive(self, ref: str) -> None:
+    def test_m2e_wtp_nested_positive(self, path: str) -> None:
         """Done-when: m2e-wtp segment denied at any depth."""
-        assert _is_denied_ref(ref) is True
+        assert _is_denied_path(path) is True
 
     def test_m2e_wtp_negative(self) -> None:
-        """Done-when: path without m2e-wtp is not denied by this rule."""
-        assert _is_denied_ref("src/main/resources/web.xml") is False
+        """Done-when: path without m2e-wtp is not denied by this rule.
+        Combined with a positive denial so the test fails pre-change."""
+        assert _is_denied_path("src/main/resources/web.xml") is False
+        assert _is_denied_path("nested/sub/m2e-wtp/web-resources/x") is True
 
 
-class TestOwnerRepoPrefixStripping:
-    """Done-when: helper strips <owner>/<repo>: prefix on FIRST ":" only."""
+class TestBarePathColonHandling:
+    """Done-when (IR-003): the helper takes a BARE path and does NOT colon-split.
+    A single-repo bare git path may legally contain a colon — splitting on the
+    first ":" would discard the leading segment(s) and mis-match a denied dir
+    word in the remainder.
+    """
 
-    @pytest.mark.parametrize(
-        "ref",
-        [
-            "Anna-Seo/TeamTestRepository:teamTest/target/classes/log4j.xml",
-            "Anna-Seo/TeamTestRepository:wrapper/META-INF/maven/x/y/pom.properties",
-            "Anna-Seo/TeamTestRepository:nested/sub/m2e-wtp/web-resources/something",
-            "Anna-Seo/TeamTestRepository:.classpath",
-            "Anna-Seo/TeamTestRepository:Module.iml",
-        ],
-    )
-    def test_prefix_stripped_denied(self, ref: str) -> None:
-        """Done-when: <owner>/<repo>: prefix is stripped before segment matching."""
-        assert _is_denied_ref(ref) is True
+    def test_colon_in_bare_path_not_split_kept(self) -> None:
+        """Done-when (IR-003): a bare path containing a colon is split ONLY on
+        "/"; its segments are taken verbatim, so "generated:target" ≠ "target"
+        and the path is KEPT. Pre-change (colon-stripping helper) this returned
+        True (denied) because "target/file.py" was left after the first colon."""
+        assert _is_denied_path("src/generated:target/file.py") is False
 
-    @pytest.mark.parametrize(
-        "ref",
-        [
-            "Anna-Seo/TeamTestRepository:src/app.py",
-            "Anna-Seo/TeamTestRepository:src/components/target.ts",
-            "Anna-Seo/TeamTestRepository:build.gradle",
-        ],
-    )
-    def test_prefix_stripped_kept(self, ref: str) -> None:
-        """Done-when: prefix-stripped authored paths are NOT denied."""
-        assert _is_denied_ref(ref) is False
+    def test_colon_segments_kept(self) -> None:
+        """Done-when (IR-003): multiple colons in a path segment do not confuse
+        matching — segments are split only on "/"."""
+        assert _is_denied_path("some/path:with:colons/file.py") is False
 
-    def test_first_colon_only(self) -> None:
-        """Done-when: split on FIRST ":" only — colons in path do not confuse matching."""
-        # Artificial but legal: path segment happens to contain a colon (URL-like)
-        # After first split: path = "some/path:with:colons/file.py"
-        # segments = ["some", "path:with:colons", "file.py"] → all kept
-        assert _is_denied_ref("owner/repo:some/path:with:colons/file.py") is False
-
-    def test_meta_inf_maven_with_prefix(self) -> None:
-        """Done-when (nested META-INF/maven with owner/repo prefix)."""
-        assert _is_denied_ref("Anna-Seo/TeamTestRepository:wrapper/META-INF/maven/x/y/pom.properties") is True
-
-    def test_meta_inf_services_with_prefix_kept(self) -> None:
-        """Done-when: META-INF NOT followed by maven with prefix → kept."""
-        assert _is_denied_ref("Anna-Seo/TeamTestRepository:src/META-INF/services/foo") is False
+    def test_bare_path_with_real_denied_segment_still_dropped(self) -> None:
+        """Done-when: a genuine denied dir segment is still caught regardless of
+        a colon elsewhere in the path."""
+        assert _is_denied_path("src/generated:foo/target/x.class") is True
 
 
 # ---------------------------------------------------------------------------
-# parse_pr_evidence — filtering
+# parse_pr_evidence — filtering (single-repo, BARE path refs)
 # ---------------------------------------------------------------------------
 
 
@@ -220,45 +208,51 @@ class TestParsePrEvidenceFiltering:
         file_refs = {e.ref for e in ev if e.kind == "file"}
         assert file_refs == set(authored)
 
-    def test_pr_records_preserved(self) -> None:
-        """Done-when: kind="pr" records are NOT affected even when every file is denied."""
+    def test_pr_records_preserved_with_denied_files_dropped(self) -> None:
+        """Done-when (IR-002 fold): kind="pr" records are preserved AND the
+        denied kind="file" refs are absent — in the SAME test, over a PR whose
+        files mix denied + authored. Pre-change the denied-absence half fails
+        (denied paths were still emitted as kind="file")."""
         denied = ["target/classes/Foo.class", ".idea/workspace.xml"]
-        ev = parse_pr_evidence(_make_pr_json(denied))
+        authored = ["src/main.py"]
+        ev = parse_pr_evidence(_make_pr_json(denied + authored))
+        # (a) PR records untouched
         pr_refs = [e.ref for e in ev if e.kind == "pr"]
         assert pr_refs == ["PR#1"]
-
-    def test_kept_authored_files(self) -> None:
-        """Done-when: authored file refs (no denied segment) are kept."""
-        authored = ["src/main.py", "tests/test_app.py", "README.md"]
-        ev = parse_pr_evidence(_make_pr_json(authored))
+        # (b) denied file refs absent (fails pre-change)
         file_refs = {e.ref for e in ev if e.kind == "file"}
-        assert file_refs == set(authored)
+        for d in denied:
+            assert d not in file_refs
+        # authored kept
+        assert "src/main.py" in file_refs
 
-    def test_over_match_guard(self) -> None:
-        """Done-when: segment over-match guard — filenames containing denied words are kept;
-        a path WITH a denied dir segment is dropped.
+    def test_over_match_keep_and_drop_combined(self) -> None:
+        """Done-when (IR-002 fold): the over-match KEEP cases and the DROP cases
+        are asserted together, so the test only passes when the denylist exists
+        AND matches correctly. Pre-change (no denylist) the DROP assertions fail;
+        an over-eager denylist would fail the KEEP assertions.
 
         KEPT: src/components/target.ts, build.gradle, pom.xml, Makefile
-        DROPPED: src/build/page.tsx (the "build" dir segment matches at depth 1)
+        DROPPED: src/build/page.tsx, target/classes/x.class
         """
-        paths = [
-            "src/components/target.ts",  # KEPT
-            "build.gradle",  # KEPT
-            "pom.xml",  # KEPT
-            "Makefile",  # KEPT
-            "src/build/page.tsx",  # DROPPED
-        ]
-        ev = parse_pr_evidence(_make_pr_json(paths))
+        kept = ["src/components/target.ts", "build.gradle", "pom.xml", "Makefile"]
+        dropped = ["src/build/page.tsx", "target/classes/x.class"]
+        ev = parse_pr_evidence(_make_pr_json(kept + dropped))
         file_refs = {e.ref for e in ev if e.kind == "file"}
-        assert "src/components/target.ts" in file_refs
-        assert "build.gradle" in file_refs
-        assert "pom.xml" in file_refs
-        assert "Makefile" in file_refs
-        assert "src/build/page.tsx" not in file_refs
+        assert file_refs == set(kept)
+
+    def test_bare_path_with_colon_kept_regression(self) -> None:
+        """Done-when (IR-003): a single-repo bare path containing a colon
+        (segments ["src", "generated:target", "file.py"] — no segment equals a
+        denied dir name) is KEPT. Pre-change the colon-stripping helper dropped
+        it (left "target/file.py" after the first colon → "target" matched)."""
+        ev = parse_pr_evidence(_make_pr_json(["src/generated:target/file.py"]))
+        file_refs = {e.ref for e in ev if e.kind == "file"}
+        assert "src/generated:target/file.py" in file_refs
 
 
 # ---------------------------------------------------------------------------
-# parse_authored_pr_evidence — filtering
+# parse_authored_pr_evidence — filtering (author-wide, <owner>/<repo>:<path> refs)
 # ---------------------------------------------------------------------------
 
 
@@ -289,8 +283,10 @@ class TestParseAuthoredPrEvidenceFiltering:
 
     OWNER_REPO = "Anna-Seo/TeamTestRepository"
 
-    def test_denied_files_dropped(self) -> None:
-        """Done-when: denied paths under <owner>/<repo>: prefix are excluded."""
+    def test_denied_dropped_and_authored_kept_combined(self) -> None:
+        """Done-when (IR-002 fold): in ONE test over a mixed fixture, denied
+        author-wide refs are dropped AND authored refs are kept. Pre-change the
+        "dropped" half fails (denied <owner>/<repo>:<path> refs were emitted)."""
         denied = [
             "teamTest/target/classes/log4j.xml",
             ".settings/org.eclipse.jdt.core.prefs",
@@ -302,15 +298,34 @@ class TestParseAuthoredPrEvidenceFiltering:
         expected = {f"{self.OWNER_REPO}:{p}" for p in authored}
         assert file_refs == expected
 
-    def test_pr_records_preserved(self) -> None:
-        """Done-when: kind="pr" records are NOT affected even when every file is denied."""
-        search_json, files_by_pr = _make_authored_json(self.OWNER_REPO, ["target/Foo.class"])
+    def test_pr_records_preserved_with_denied_files_dropped(self) -> None:
+        """Done-when (IR-002 fold): kind="pr" records preserved AND denied
+        file refs absent in the same test, over a mixed fixture. Pre-change
+        the denied-absence half fails."""
+        denied = ["target/Foo.class"]
+        authored = ["src/App.java"]
+        search_json, files_by_pr = _make_authored_json(self.OWNER_REPO, denied + authored)
         ev = parse_authored_pr_evidence(search_json, files_by_pr)
+        # PR records untouched
         pr_refs = [e.ref for e in ev if e.kind == "pr"]
         assert pr_refs == [f"{self.OWNER_REPO}#1"]
+        # denied absent (fails pre-change)
+        file_refs = {e.ref for e in ev if e.kind == "file"}
+        assert f"{self.OWNER_REPO}:target/Foo.class" not in file_refs
+        assert f"{self.OWNER_REPO}:src/App.java" in file_refs
+
+    def test_author_wide_target_dropped(self) -> None:
+        """Done-when (IR-003): an author-wide
+        owner/repo:teamTest/target/classes/log4j.xml is still DROPPED — the
+        helper receives the bare path component "teamTest/target/classes/..."
+        and the "target" segment matches."""
+        search_json, files_by_pr = _make_authored_json(self.OWNER_REPO, ["teamTest/target/classes/log4j.xml"])
+        ev = parse_authored_pr_evidence(search_json, files_by_pr)
+        file_refs = {e.ref for e in ev if e.kind == "file"}
+        assert f"{self.OWNER_REPO}:teamTest/target/classes/log4j.xml" not in file_refs
 
     def test_meta_inf_maven_denied(self) -> None:
-        """Done-when: META-INF/maven at nested depth denied after prefix stripping."""
+        """Done-when: META-INF/maven at nested depth denied; authored kept."""
         paths = [
             "wrapper/META-INF/maven/x/y/pom.properties",  # denied
             "src/main/java/App.java",  # kept
@@ -331,19 +346,19 @@ class TestNestedDepthDenial:
     """Done-when: META-INF/maven and m2e-wtp denied at nested depths."""
 
     def test_meta_inf_maven_nested_cases(self) -> None:
-        """Done-when: all four nested positive cases from outcome.md are denied."""
+        """Done-when: all nested positive cases from outcome.md are denied."""
         cases = [
             "module/META-INF/maven/com.example/foo/pom.properties",
             "subdir/nested/META-INF/maven/group/artifact/pom.xml",
             "nested/sub/m2e-wtp/web-resources/something",
-            "Anna-Seo/TeamTestRepository:wrapper/META-INF/maven/x/y/pom.properties",
+            "wrapper/META-INF/maven/x/y/pom.properties",
         ]
-        for ref in cases:
-            assert _is_denied_ref(ref) is True, f"Expected {ref!r} to be denied"
+        for path in cases:
+            assert _is_denied_path(path) is True, f"Expected {path!r} to be denied"
 
     def test_meta_inf_services_not_denied(self) -> None:
         """Done-when: src/META-INF/services/foo is kept (META-INF NOT followed by maven)."""
-        assert _is_denied_ref("src/META-INF/services/foo") is False
+        assert _is_denied_path("src/META-INF/services/foo") is False
 
 
 # ---------------------------------------------------------------------------
@@ -483,14 +498,14 @@ class TestJsj0345Regression:
 
     def test_46_denied_paths_all_match(self) -> None:
         """Sanity: every path in _DENIED_46 is actually denied by the helper."""
-        prefix = f"{_OWNER_REPO}:"
         for path in _DENIED_46:
-            ref = f"{prefix}{path}"
-            assert _is_denied_ref(ref) is True, f"Expected {ref!r} to be denied"
+            assert _is_denied_path(path) is True, f"Expected {path!r} to be denied"
 
     def test_4_authored_paths_all_kept(self) -> None:
-        """Sanity: every path in _AUTHORED_4 is NOT denied by the helper."""
-        prefix = f"{_OWNER_REPO}:"
+        """Every _AUTHORED_4 path is KEPT and every _DENIED_46 path is DENIED —
+        combined in one test so it fails against pre-change behavior (where the
+        denied paths were still emitted as evidence)."""
         for path in _AUTHORED_4:
-            ref = f"{prefix}{path}"
-            assert _is_denied_ref(ref) is False, f"Expected {ref!r} to be kept"
+            assert _is_denied_path(path) is False, f"Expected {path!r} to be kept"
+        for path in _DENIED_46:
+            assert _is_denied_path(path) is True, f"Expected {path!r} to be denied"
