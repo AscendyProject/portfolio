@@ -104,10 +104,10 @@ def _count_repos(evidence: list) -> int:
     return count_repos_from_refs(e.ref for e in evidence)
 
 
-def _stack_summary(evidence: list) -> str:
+def _stack_summary(evidence: list, lang: str = "en") -> str:
     langs = stack_languages(evidence)
     if not langs:
-        return "no stack detected"
+        return LANGS[lang]["stack_summary_none"]
     return ", ".join(sorted(langs))
 
 
@@ -178,7 +178,7 @@ def render_markdown(
     # --- Stats ---
     n_prs = sum(1 for e in portfolio.evidence if e.kind == "pr")
     n_repos = _count_repos(portfolio.evidence)
-    stack = _stack_summary(portfolio.evidence)
+    stack = _stack_summary(portfolio.evidence, lang)
 
     # --- Headline blockquote ---
     headline: str | None = synthesis.headline if synthesis is not None else None

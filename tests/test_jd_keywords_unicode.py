@@ -18,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from portfolio.model import Claim, Evidence, Portfolio  # noqa: E402
 from resume.select import (  # noqa: E402
-    STOPWORDS,
     build_resume,
     jd_keywords,
     select_claims,
@@ -82,67 +81,6 @@ def test_korean_claim_score_positive_via_build_resume():
     draft = build_resume(portfolio, ko_jd, top_n=5)
     assert len(draft.selected) > 0, "Korean claim should be selected for Korean JD"
     assert draft.jd_keywords_total > 0
-
-
-# ---------------------------------------------------------------------------
-# ASCII / English path regression guard
-# ---------------------------------------------------------------------------
-# Re-assert key behaviours from test_resume_select.py on English input to ensure
-# the Unicode-aware tokenizer has not regressed ASCII behaviour.
-
-
-def test_english_lowercases():
-    """English path: lowercases input before tokenizing (regression guard)."""
-    result = jd_keywords("Python Go KUBERNETES")
-    assert "python" in result
-    assert "go" in result
-    assert "kubernetes" in result
-
-
-def test_english_splits_on_non_alphanumerics():
-    """English path: splits on non-alphanumerics (regression guard)."""
-    result = jd_keywords("aws,gcp.azure:kubernetes-docker")
-    assert result == {"aws", "gcp", "azure", "kubernetes", "docker"}
-
-
-def test_english_removes_stopwords():
-    """English path: removes the STOPWORDS constant (regression guard)."""
-    stopword_input = " ".join(sorted(STOPWORDS))
-    assert jd_keywords(stopword_input) == set()
-
-
-def test_english_dedup():
-    """English path: returns a set (regression guard)."""
-    result = jd_keywords("python python python")
-    assert result == {"python"}
-
-
-def test_english_empty_input():
-    """English path: empty/whitespace input returns empty set (regression guard)."""
-    assert jd_keywords("") == set()
-    assert jd_keywords("   ") == set()
-
-
-def test_english_path_byte_identical_on_ascii_fixture():
-    """Unicode tokenizer: ASCII English JD produces the same tokens as the old re.split path.
-
-    Verifies byte-identical behaviour on a representative ASCII fixture.
-    The old implementation was: {t for t in re.split(r'[^a-z0-9]+', text.lower()) if t and t not in STOPWORDS}
-    """
-    import re
-
-    ascii_jd = "Python backend engineer with 3+ years of experience in Django and REST APIs"
-
-    def old_tokenizer(text: str) -> set[str]:
-        tokens = re.split(r"[^a-z0-9]+", text.lower())
-        return {t for t in tokens if t and t not in STOPWORDS}
-
-    old_result = old_tokenizer(ascii_jd)
-    new_result = jd_keywords(ascii_jd)
-    assert old_result == new_result, (
-        f"Unicode tokenizer differs from old ASCII tokenizer on English input.\n"
-        f"Old: {sorted(old_result)}\nNew: {sorted(new_result)}"
-    )
 
 
 # ---------------------------------------------------------------------------

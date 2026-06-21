@@ -43,12 +43,19 @@ def render_rating(
     # --- Per-dimension metrics ---
     lines.append(f"## {strings['section_dimensions']}")
     lines.append("")
+    dimension_names = strings.get("dimension_names", {})
+    band_labels = strings.get("band_labels", {})
     for dim_name, dim in profile_result.dimensions.items():
-        heading = dim_name.replace("_", " ").title()
+        # All real dimension keys / band values are mapped in LANGS for every
+        # supported language (enforced by test_dimension_band_tables_complete),
+        # so these lookups never fall back to the raw identifier — no
+        # untranslated English UI can leak into a localized render (IR-004).
+        heading = dimension_names.get(dim_name, dim_name)
+        band_label = band_labels.get(dim.band, dim.band)
         lines.append(f"### {_escape(heading)}")
         lines.append(
             f"- {strings['dim_value_label']}: {dim.value}  "
-            f"{strings['dim_band_label']}: {dim.band}  "
+            f"{strings['dim_band_label']}: {band_label}  "
             f"{strings['dim_points_label']}: {dim.points}"
         )
         if show_refs and dim.evidence_refs:

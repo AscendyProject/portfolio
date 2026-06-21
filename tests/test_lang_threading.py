@@ -757,3 +757,279 @@ def test_render_ko_uses_korean_strings():
     # English title must NOT be in the ko output (since they differ)
     assert LANGS["en"]["title_portfolio"] != LANGS["ko"]["title_portfolio"]
     assert LANGS["en"]["title_portfolio"] not in out_ko
+
+
+# ---------------------------------------------------------------------------
+# IR-003 #2: --mask-private equivalence across languages
+#
+# Masking is language-neutral: the masked private-repo placeholders must be
+# byte-identical regardless of lang.
+# ---------------------------------------------------------------------------
+
+import re  # noqa: E402
+
+
+def _masked_placeholders(text: str) -> list[str]:
+    """Sorted, de-duplicated private-repo-N placeholders found in rendered text."""
+    return sorted(set(re.findall(r"private-repo-\d+", text)))
+
+
+def test_mask_private_placeholders_byte_identical_across_langs():
+    """The masked private-repo placeholders are byte-identical for en and ko renders.
+
+    Same masked fixture → identical placeholder tokens; masking is language-neutral.
+    """
+    from portfolio.mask import mask_portfolio
+    from portfolio.render import render_markdown
+
+    evidence = [
+        Evidence(kind="pr", ref="acme/secret#7", url="https://github.com/acme/secret/pull/7", detail="feat"),
+        Evidence(kind="file", ref="acme/secret:app/main.py", url="", detail="file"),
+    ]
+    claim = Claim(
+        text="Built the secret service",
+        evidence_refs=["acme/secret#7", "acme/secret:app/main.py"],
+        confidence=0.9,
+        grounded=True,
+    )
+    portfolio = Portfolio(subject="alice", evidence=evidence, claims=[claim])
+
+    masked = mask_portfolio(portfolio, {"acme/secret"})
+
+    out_en = render_markdown(masked, show_refs=True, lang="en")
+    out_ko = render_markdown(masked, show_refs=True, lang="ko")
+
+    en_ph = _masked_placeholders(out_en)
+    ko_ph = _masked_placeholders(out_ko)
+
+    assert en_ph == ko_ph, f"masked placeholders differ across langs: en={en_ph} ko={ko_ph}"
+    assert en_ph == ["private-repo-1"], f"expected one masked repo, got {en_ph}"
+    # The original private repo name must be scrubbed in BOTH languages.
+    assert "acme/secret" not in out_en
+    assert "acme/secret" not in out_ko
+
+
+# ---------------------------------------------------------------------------
+# IR-003 #3: cited evidence refs are byte-identical across langs for ALL builders
+# ---------------------------------------------------------------------------
+
+
+def _refs_in(prompt: str, refs: list[str]) -> bool:
+    return all(r in prompt for r in refs)
+
+
+def _ref_fixture():
+    evidence = [
+        Evidence(kind="pr", ref="owner/repo#42", url="https://github.com/owner/repo/pull/42", detail="feat"),
+        Evidence(kind="file", ref="owner/repo:src/main.py", url="", detail="file"),
+    ]
+    claim = Claim(
+        text="Built thing",
+        evidence_refs=["owner/repo#42", "owner/repo:src/main.py"],
+        confidence=0.9,
+        grounded=True,
+    )
+    portfolio = Portfolio(subject="alice", evidence=evidence, claims=[claim])
+    return portfolio, ["owner/repo#42", "owner/repo:src/main.py"]
+
+
+def test_synthesis_refs_byte_identical_across_langs():
+    """portfolio.synthesis.synthesize: cited refs in the built prompt are lang-neutral."""
+    from portfolio.synthesis import synthesize
+
+    portfolio, refs = _ref_fixture()
+    captured: dict[str, str] = {}
+
+    def make_runner(key):
+        def runner(prompt: str) -> str:
+            captured[key] = prompt
+            return "{}"
+
+        return runner
+
+    synthesize(portfolio, make_runner("en"), lang="en")
+    synthesize(portfolio, make_runner("ko"), lang="ko")
+
+    assert _refs_in(captured["en"], refs)
+    assert _refs_in(captured["ko"], refs)
+    # The ref-bearing claim line is identical in both prompts.
+    ref_line = f"- Built thing (refs: {', '.join(refs)})"
+    assert ref_line in captured["en"]
+    assert ref_line in captured["ko"]
+
+
+def test_letter_refs_byte_identical_across_langs():
+    """reference_check.letter.build_letter_prompt: cited refs are lang-neutral."""
+    from reference_check.letter import build_letter_prompt
+
+    portfolio, refs = _ref_fixture()
+    prompt_en = build_letter_prompt(portfolio, lang="en")
+    prompt_ko = build_letter_prompt(portfolio, lang="ko")
+
+    assert _refs_in(prompt_en, refs)
+    assert _refs_in(prompt_ko, refs)
+    # The ALLOWED REFS block (sorted unique refs) is byte-identical across langs.
+    refs_block = "\n".join(f"- {r}" for r in sorted(set(refs)))
+    assert refs_block in prompt_en
+    assert refs_block in prompt_ko
+
+
+def test_fit_grader_refs_byte_identical_across_langs():
+    """fit.grade._build_grader_prompt: cited refs are lang-neutral."""
+    from fit.grade import _build_grader_prompt
+
+    portfolio, refs = _ref_fixture()
+    prompt_en = _build_grader_prompt(portfolio, "B", (70, 84), lang="en")
+    prompt_ko = _build_grader_prompt(portfolio, "B", (70, 84), lang="ko")
+
+    assert _refs_in(prompt_en, refs)
+    assert _refs_in(prompt_ko, refs)
+    # The grounded-claims line carrying the refs is identical in both prompts.
+    claim_line = f"- Built thing  (refs: {', '.join(refs)})"
+    assert claim_line in prompt_en
+    assert claim_line in prompt_ko
+
+
+def test_rating_grader_refs_byte_identical_across_langs():
+    """rating.grade._build_prompt: cited refs are lang-neutral."""
+    from rating.grade import _build_prompt
+    from rating.profile import DimensionResult, ProfileResult
+
+    portfolio, refs = _ref_fixture()
+    profile_result = ProfileResult(
+        grade="B",
+        score_min=70,
+        score_max=84,
+        dimensions={"volume": DimensionResult(name="volume", value=1, band="Low", points=0, evidence_refs=refs)},
+    )
+    prompt_en = _build_prompt(portfolio, profile_result, lang="en")
+    prompt_ko = _build_prompt(portfolio, profile_result, lang="ko")
+
+    assert _refs_in(prompt_en, refs)
+    assert _refs_in(prompt_ko, refs)
+    # The ALLOWED EVIDENCE REFS line is byte-identical across langs.
+    allowed_line = f"ALLOWED EVIDENCE REFS: {', '.join(refs)}"
+    assert allowed_line in prompt_en
+    assert allowed_line in prompt_ko
+
+
+# ---------------------------------------------------------------------------
+# IR-003 #4: each CLI threads lang into EVERY prompt builder it invokes
+# (not merely that the rendered title is translated)
+# ---------------------------------------------------------------------------
+
+
+def test_portfolio_cli_threads_lang_into_narrative_and_synthesis(capsys):
+    """portfolio CLI --lang ko: BOTH the narrative runner and synthesis_runner
+    receive a prompt containing the Korean language name."""
+    from portfolio.cli import run
+
+    narrative_runner, narrative_prompts = _capturing_runner()
+    synth_runner, synth_prompts = _capturing_runner()
+
+    code = run(
+        ["--source-type", "github", "--source", "https://github.com/o/repo", "--author", "alice", "--lang", "ko"],
+        extractor=_fake_extractor,
+        runner=narrative_runner,
+        synthesis_runner=synth_runner,
+    )
+    capsys.readouterr()
+    assert code == 0
+    assert any(language_name("ko") in p for p in narrative_prompts), "narrative prompt missing Korean"
+    assert any(language_name("ko") in p for p in synth_prompts), "synthesis prompt missing Korean"
+
+
+def test_resume_cli_threads_lang_into_narrative(capsys, tmp_path):
+    """resume CLI --lang ko: the narrative runner receives a Korean prompt."""
+    from resume.cli import run
+
+    narrative_runner, narrative_prompts = _capturing_runner()
+    jd_path = _make_jd_file(tmp_path, _ENGLISH_JD)
+    code = run(
+        [
+            "--source-type",
+            "github",
+            "--source",
+            "https://github.com/o/repo",
+            "--author",
+            "alice",
+            "--jd",
+            jd_path,
+            "--lang",
+            "ko",
+        ],
+        extractor=_fake_extractor,
+        runner=narrative_runner,
+    )
+    capsys.readouterr()
+    assert code == 0
+    assert any(language_name("ko") in p for p in narrative_prompts), "resume narrative prompt missing Korean"
+
+
+def test_fit_cli_threads_lang_into_narrative_and_grader(capsys, tmp_path):
+    """fit CLI --lang ko: BOTH the narrative runner and grader_runner receive Korean prompts."""
+    from fit.cli import run
+
+    narrative_runner, narrative_prompts = _capturing_runner()
+    grader_runner, grader_prompts = _capturing_grader_runner()
+    jd_path = _make_jd_file(tmp_path, _ENGLISH_JD)
+    code = run(
+        [
+            "--source-type",
+            "github",
+            "--source",
+            "https://github.com/o/repo",
+            "--author",
+            "alice",
+            "--jd",
+            jd_path,
+            "--lang",
+            "ko",
+        ],
+        extractor=_fake_extractor,
+        runner=narrative_runner,
+        grader_runner=grader_runner,
+    )
+    capsys.readouterr()
+    assert code == 0
+    assert any(language_name("ko") in p for p in narrative_prompts), "fit narrative prompt missing Korean"
+    assert any(language_name("ko") in p for p in grader_prompts), "fit grader prompt missing Korean"
+
+
+def test_rating_cli_threads_lang_into_narrative_and_grader(capsys):
+    """rating CLI --lang ko: BOTH the narrative runner and grader_runner receive Korean prompts."""
+    from rating.cli import run
+
+    narrative_runner, narrative_prompts = _capturing_runner()
+    grader_runner, grader_prompts = _capturing_grader_runner()
+    code = run(
+        ["--source-type", "github", "--source", "https://github.com/o/repo", "--author", "alice", "--lang", "ko"],
+        extractor=_fake_extractor,
+        runner=narrative_runner,
+        grader_runner=grader_runner,
+    )
+    capsys.readouterr()
+    assert code == 0
+    assert any(language_name("ko") in p for p in narrative_prompts), "rating narrative prompt missing Korean"
+    assert any(language_name("ko") in p for p in grader_prompts), "rating grader prompt missing Korean"
+
+
+def test_reference_check_cli_threads_lang_into_narrative_and_letter(capsys):
+    """reference_check CLI --lang ko: the runner drives BOTH narration and the letter
+    builder; every captured prompt-bearing call must carry the Korean language name."""
+    from reference_check.cli import run
+
+    runner, prompts = _capturing_runner()
+    code = run(
+        ["--source-type", "github", "--source", "https://github.com/o/repo", "--author", "alice", "--lang", "ko"],
+        extractor=_fake_extractor,
+        runner=runner,
+    )
+    capsys.readouterr()
+    assert code == 0
+    # The reference_check CLI uses the same runner for narration and the letter
+    # prompt; EVERY captured prompt must be Korean-threaded (not just one).
+    assert prompts, "reference_check runner was never invoked"
+    assert all(language_name("ko") in p for p in prompts), (
+        "a reference_check prompt was not threaded with the Korean language name"
+    )

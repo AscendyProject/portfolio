@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import unicodedata
 
-LANGS: dict[str, dict[str, str]] = {
+LANGS: dict[str, dict] = {
     "en": {
         "name": "English",
         # portfolio/render.py
@@ -26,6 +26,7 @@ LANGS: dict[str, dict[str, str]] = {
         "fallback_headline": "Portfolio for {subject} — {n_prs} merged PRs across {n_repos} repos.",
         "stat_merged_prs": "merged PRs",
         "stat_repos": "repos",
+        "stack_summary_none": "no stack detected",
         "section_highlights": "Highlights",
         "group_other": "Other",
         "confidence": "Confidence",
@@ -72,6 +73,25 @@ LANGS: dict[str, dict[str, str]] = {
             "in any population."
         ),
         "section_dimensions": "Dimensions",
+        # per-dimension display names (keyed by rating.profile dimension key);
+        # en values reproduce the legacy dim_name.replace("_", " ").title() output.
+        "dimension_names": {
+            "volume": "Volume",
+            "breadth": "Breadth",
+            "stack_diversity": "Stack Diversity",
+        },
+        # band enum labels (keyed by rating.profile band value); en values are identity.
+        "band_labels": {
+            "High": "High",
+            "Steady": "Steady",
+            "Low": "Low",
+            "Wide": "Wide",
+            "Moderate": "Moderate",
+            "Narrow": "Narrow",
+            "Polyglot": "Polyglot",
+            "Versatile": "Versatile",
+            "Focused": "Focused",
+        },
         "dim_value_label": "Value",
         "dim_band_label": "Band",
         "dim_points_label": "Points",
@@ -103,6 +123,7 @@ LANGS: dict[str, dict[str, str]] = {
         "fallback_headline": "{subject}의 포트폴리오 — {n_repos}개 저장소, {n_prs}개 병합된 PR",
         "stat_merged_prs": "병합된 PR",
         "stat_repos": "저장소",
+        "stack_summary_none": "기술 스택 미감지",
         "section_highlights": "주요 성과",
         "group_other": "기타",
         "confidence": "신뢰도",
@@ -147,6 +168,24 @@ LANGS: dict[str, dict[str, str]] = {
             "> 이 점수는 개발자 본인의 근거 기반 평가이며, 다른 엔지니어와의 비교나 집단 내 순위를 나타내지 않습니다."
         ),
         "section_dimensions": "평가 항목",
+        # 평가 항목 표시 이름 (rating.profile 차원 키 기준)
+        "dimension_names": {
+            "volume": "활동량",
+            "breadth": "범위",
+            "stack_diversity": "기술 다양성",
+        },
+        # 밴드 레이블 (rating.profile 밴드 값 기준)
+        "band_labels": {
+            "High": "높음",
+            "Steady": "꾸준함",
+            "Low": "낮음",
+            "Wide": "넓음",
+            "Moderate": "보통",
+            "Narrow": "좁음",
+            "Polyglot": "다언어",
+            "Versatile": "다재다능",
+            "Focused": "집중",
+        },
         "dim_value_label": "값",
         "dim_band_label": "범위",
         "dim_points_label": "점수",
