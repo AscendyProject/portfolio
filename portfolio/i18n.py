@@ -92,6 +92,8 @@ LANGS: dict[str, dict[str, str]] = {
         "insufficient_evidence": "_insufficient grounded evidence — letter not generated_",
         "letter_greeting": "Dear Hiring Manager,",
         "letter_closing": "Sincerely,",
+        # inline refs label used by highlight bullets and reasoning bullets (show_refs=True)
+        "refs_inline_label": "refs",
     },
     "ko": {
         "name": "Korean",
@@ -165,6 +167,8 @@ LANGS: dict[str, dict[str, str]] = {
         "insufficient_evidence": "_근거 있는 증거 부족 — 추천서를 생성할 수 없습니다_",
         "letter_greeting": "채용 담당자님께,",
         "letter_closing": "감사합니다,",
+        # inline refs label used by highlight bullets and reasoning bullets (show_refs=True)
+        "refs_inline_label": "참조",
     },
 }
 

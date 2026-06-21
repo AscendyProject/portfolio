@@ -206,7 +206,7 @@ def render_markdown(
                 # (even for empty evidence_refs → `(refs: )`); --show-refs restores it
                 # byte-for-byte. Default (show_refs=False) drops the suffix entirely.
                 escaped_refs = ", ".join(_escape(r) for r in bullet.evidence_refs)
-                lines.append(f"- {escaped_text} (refs: {escaped_refs})")
+                lines.append(f"- {escaped_text} ({strings['refs_inline_label']}: {escaped_refs})")
             else:
                 lines.append(f"- {escaped_text}")
         lines.append("")

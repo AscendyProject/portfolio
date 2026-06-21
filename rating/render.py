@@ -64,7 +64,7 @@ def render_rating(
         refs = bullet.get("evidence_refs", [])
         if show_refs and refs:
             refs_str = ", ".join(_escape(r) for r in refs)
-            lines.append(f"- {text} _(refs: {refs_str})_")
+            lines.append(f"- {text} _({strings['refs_inline_label']}: {refs_str})_")
         else:
             lines.append(f"- {text}")
     lines.append("")
