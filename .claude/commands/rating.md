@@ -1,6 +1,6 @@
 ---
 description: Assess a developer's capability with a grounded grade and rubric score from their real work. Does NOT produce an absolute percentile or comparison to any population.
-argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] [--mask-private] [--out <file>]"
+argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] [--lang en|ko] [--mask-private] [--out <file>]"
 ---
 
 The user wants a **grounded capability assessment** — a deterministic grade (S/A/B/C/D)
@@ -29,6 +29,9 @@ Arguments (may be empty): `$ARGUMENTS`
      or the path to a `.json` file for portfolio. Not required for `github-author`.
    - **author** — the GitHub handle (github / github-author) or subject name (web) the
      assessment is for. Not used for `portfolio`.
+   - optionally **--lang `en`|`ko`** to set the output language for the rendered
+     Markdown scorecard (UI strings and LLM prose). Defaults to `en` when omitted.
+     Supported: `en` (English), `ko` (Korean).
    - optionally **--out <file>** if the user wants the Markdown written to a file instead of
      shown inline.
    - optionally **--mask-private** to anonymize private GitHub repo names in the output

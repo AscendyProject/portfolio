@@ -29,6 +29,7 @@ def build_from_evidence(
     max_claims: int = 12,
     *,
     synthesis_runner: Runner | None = None,
+    lang: str = "en",
 ) -> BuildResult:
     """Narrate over already-extracted evidence, ground the claims, assemble the
     Portfolio. Kept separate from extraction so it's testable with a fake runner.
@@ -37,12 +38,12 @@ def build_from_evidence(
     passing four args (subject, evidence, runner, max_claims) are unaffected.
     When synthesis_runner is None, or portfolio.claims is empty, synthesis is skipped.
     """
-    drafted: list[Claim] = narrate(evidence, runner, max_claims=max_claims)
+    drafted: list[Claim] = narrate(evidence, runner, max_claims=max_claims, lang=lang)
     grounding = check_claims(drafted, evidence)
     portfolio = Portfolio(subject=subject, evidence=evidence, claims=grounding.grounded)
     synthesis: SynthesisResult | None = None
     if synthesis_runner is not None and portfolio.claims:
-        synthesis = synthesize(portfolio, synthesis_runner)
+        synthesis = synthesize(portfolio, synthesis_runner, lang=lang)
     return BuildResult(portfolio=portfolio, grounding=grounding, synthesis=synthesis)
 
 
@@ -53,6 +54,7 @@ def resolve_to_build_result(
     max_claims: int = 12,
     *,
     synthesis_runner: Runner | None = None,
+    lang: str = "en",
 ) -> BuildResult:
     """Shared helper used by all five CLIs.
 
@@ -69,7 +71,7 @@ def resolve_to_build_result(
         )
         result_synthesis: SynthesisResult | None = None
         if synthesis_runner is not None and portfolio.claims:
-            result_synthesis = synthesize(portfolio, synthesis_runner)
+            result_synthesis = synthesize(portfolio, synthesis_runner, lang=lang)
         return BuildResult(portfolio=portfolio, grounding=grounding, synthesis=result_synthesis)
     evidence = resolved.extract()
     return build_from_evidence(
@@ -78,6 +80,7 @@ def resolve_to_build_result(
         runner=runner,
         max_claims=max_claims,
         synthesis_runner=synthesis_runner,
+        lang=lang,
     )
 
 
@@ -96,6 +99,7 @@ def resolve_and_optionally_mask(
     mask_private: bool = False,
     synthesis_runner: Runner | None = None,
     visibility_lookup=None,
+    lang: str = "en",
 ) -> tuple[BuildResult, int]:
     """Returns (BuildResult, n_masked). n_masked is 0 when mask_private=False.
 
@@ -109,6 +113,7 @@ def resolve_and_optionally_mask(
             runner=runner,
             max_claims=max_claims,
             synthesis_runner=synthesis_runner,
+            lang=lang,
         )
         return result, 0
 
@@ -119,6 +124,7 @@ def resolve_and_optionally_mask(
         runner=runner,
         max_claims=max_claims,
         synthesis_runner=None,
+        lang=lang,
     )
 
     # Import masking functions here to avoid circular imports
@@ -140,7 +146,7 @@ def resolve_and_optionally_mask(
     # Run synthesis on the masked portfolio (if requested)
     synthesis: SynthesisResult | None = None
     if synthesis_runner is not None and masked_portfolio.claims:
-        raw_synthesis = synthesize(masked_portfolio, synthesis_runner)
+        raw_synthesis = synthesize(masked_portfolio, synthesis_runner, lang=lang)
         # Post-synthesis scrub: replace any private owner/repo the model emitted in
         # text/refs, using the collision-safe (longest-first) rewrite so `org/repo`
         # never partially masks `org/repo-tools` (IR-002).

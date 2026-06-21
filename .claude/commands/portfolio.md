@@ -1,6 +1,6 @@
 ---
 description: Generate a grounded portfolio from a GitHub repo or a blog/article URL (runs python -m portfolio).
-argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] | [merge <a.json> <b.json> --subject <name> --out <file>] [--mask-private] [--out <file>]"
+argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] | [merge <a.json> <b.json> --subject <name> --out <file>] [--lang en|ko] [--mask-private] [--out <file>]"
 ---
 
 The user wants to generate a **grounded** portfolio — every claim traced to real
@@ -37,6 +37,11 @@ Arguments (may be empty): `$ARGUMENTS`
    - optionally **--mask-private** to anonymize private GitHub repo names in the output
      before sharing. Detected from structured fields only; semantic project names are
      NOT masked. A `masked N private repo(s)` summary is printed to stderr.
+   - optionally **--lang `en`|`ko`** to set the output language for the rendered
+     Markdown document (UI strings and LLM prose). Defaults to `en` when omitted.
+     Supported: `en` (English), `ko` (Korean). Note: re-rendering a stored portfolio
+     JSON in a new `--lang` re-translates UI strings only; the stored claim text is
+     not re-translated (it stays as the model originally wrote it).
    - optionally **--show-refs** to include grounding evidence refs in the rendered
      Markdown document. By default refs are hidden (the internal grounding still runs;
      only the display is suppressed). Pass `--show-refs` to reveal Evidence blocks and

@@ -18,6 +18,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from portfolio.i18n import language_name
 from portfolio.model import Portfolio
 from portfolio.narrative import run_claude
 
@@ -49,11 +50,11 @@ class GradeResult:
     reasoning: list[dict] = field(default_factory=list)  # [{"text": ..., "evidence_refs": [...]}]
 
 
-def _build_grader_prompt(portfolio: Portfolio, grade: str, band: tuple[int, int]) -> str:
+def _build_grader_prompt(portfolio: Portfolio, grade: str, band: tuple[int, int], lang: str = "en") -> str:
     """Build a fixed, deterministic grader prompt.
 
     The prompt contains no clock value, no env value, no random value — so the
-    same (portfolio, grade, band) inputs always produce byte-identical prompt text.
+    same (portfolio, grade, band, lang) inputs always produce byte-identical prompt text.
     """
     min_score, max_score = band
     evidence_lines = "\n".join(f"- {e.ref}  [{e.kind}]  {e.detail}".rstrip() for e in portfolio.evidence)
@@ -69,7 +70,8 @@ def _build_grader_prompt(portfolio: Portfolio, grade: str, band: tuple[int, int]
         f'  "score": integer in [{min_score}, {max_score}],\n'
         f'  "reasoning": list of objects with keys "text" (string) and '
         f'"evidence_refs" (list of ref strings from PORTFOLIO EVIDENCE above).\n'
-        f"No prose, no code fences, JSON object only."
+        f"No prose, no code fences, JSON object only.\n\n"
+        f"Write all prose in {language_name(lang)}."
     )
 
 
@@ -78,6 +80,7 @@ def bounded_grade(
     grade: str,
     band: tuple[int, int],
     grader_runner: GraderRunner,
+    lang: str = "en",
 ) -> GradeResult:
     """Call the grader_runner exactly once with a fixed prompt; clamp the returned
     score into the locked band; re-grounding-check reasoning bullets.
@@ -91,7 +94,7 @@ def bounded_grade(
     midpoint = (min_score + max_score) // 2
     real_refs = {e.ref for e in portfolio.evidence}
 
-    prompt = _build_grader_prompt(portfolio, grade, band)
+    prompt = _build_grader_prompt(portfolio, grade, band, lang=lang)
     # temperature=0 is always passed by keyword (seam contract)
     raw = grader_runner(prompt, temperature=0)
 

@@ -15,6 +15,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from portfolio.i18n import language_name
 from portfolio.model import Portfolio
 from rating.profile import ProfileResult
 
@@ -31,10 +32,10 @@ class GradeResult:
     reasoning: list[dict]  # grounding-checked bullets: [{"text": ..., "evidence_refs": [...]}]
 
 
-def _build_prompt(portfolio: Portfolio, profile_result: ProfileResult) -> str:
+def _build_prompt(portfolio: Portfolio, profile_result: ProfileResult, lang: str = "en") -> str:
     """Build a fixed, deterministic prompt for the grader.
 
-    Same portfolio + profile_result → identical prompt across calls.
+    Same portfolio + profile_result + lang → identical prompt across calls.
     """
     grade = profile_result.grade
     score_min = profile_result.score_min
@@ -61,7 +62,8 @@ def _build_prompt(portfolio: Portfolio, profile_result: ProfileResult) -> str:
         f"Output STRICT JSON only:\n"
         f'{{"score": <integer {score_min}–{score_max}>, '
         f'"reasoning": [{{"text": "<bullet>", "evidence_refs": ["<ref>", ...]}}]}}\n'
-        f"No prose, no code fences. JSON only."
+        f"No prose, no code fences. JSON only.\n\n"
+        f"Write all prose in {language_name(lang)}."
     )
 
 
@@ -139,6 +141,7 @@ def grade(
     portfolio: Portfolio,
     profile_result: ProfileResult,
     grader_runner: GraderRunner,
+    lang: str = "en",
 ) -> GradeResult:
     """Call grader_runner deterministically and return a bounded GradeResult.
 
@@ -147,7 +150,7 @@ def grade(
     Reasoning bullets whose refs are not in portfolio.evidence are dropped.
     Malformed grader responses yield midpoint score + safe reasoning (no crash).
     """
-    prompt = _build_prompt(portfolio, profile_result)
+    prompt = _build_prompt(portfolio, profile_result, lang=lang)
     raw = grader_runner(prompt, temperature=0)
     score, reasoning = _parse_response(raw, portfolio, profile_result.score_min, profile_result.score_max)
     return GradeResult(

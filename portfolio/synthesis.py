@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+from .i18n import language_name
 from .model import Portfolio
 from .narrative import Runner
 
@@ -28,7 +29,7 @@ class SynthesisResult:
     highlights: list[HighlightBullet] = field(default_factory=list)
 
 
-def synthesize(portfolio: Portfolio, runner: Runner) -> SynthesisResult:
+def synthesize(portfolio: Portfolio, runner: Runner, lang: str = "en") -> SynthesisResult:
     """Run the injected runner once over the portfolio's grounded claims and return
     a grounding-re-checked SynthesisResult.
 
@@ -53,7 +54,8 @@ def synthesize(portfolio: Portfolio, runner: Runner) -> SynthesisResult:
         "Output a strict JSON object:\n"
         '{"headline": "<1-3 line summary>", "headline_refs": ["<ref>", ...], '
         '"highlights": [{"text": "<bullet text>", "evidence_refs": ["<ref>", ...]}, ...]}\n\n'
-        "No prose, no code fences, JSON object only."
+        "No prose, no code fences, JSON object only.\n\n"
+        f"Write all prose in {language_name(lang)}."
     )
 
     raw = runner(prompt)

@@ -9,15 +9,12 @@ No model, subprocess, or network call is made — stdlib and resume.select only.
 
 from __future__ import annotations
 
-from resume.select import ResumeDraft
+from portfolio.i18n import LANGS
 from portfolio.render import _escape, claim_group, count_repos_from_refs, stack_languages
-
-_NO_BULLETS_NOTICE = "_no grounded resume bullets_"
-_CONTACT_PLACEHOLDER = "_Add your contact details._"
-_EDUCATION_PLACEHOLDER = "_Add your education._"
+from resume.select import ResumeDraft
 
 
-def render_resume(draft: ResumeDraft, *, show_refs: bool = False) -> str:
+def render_resume(draft: ResumeDraft, *, show_refs: bool = False, lang: str = "en") -> str:
     """Render a ResumeDraft to a Markdown string.
 
     Non-empty draft emits: # heading, Summary stat line, ## Experience with
@@ -27,21 +24,22 @@ def render_resume(draft: ResumeDraft, *, show_refs: bool = False) -> str:
     Empty draft emits: # heading, 'no grounded resume bullets' notice, then
     ## Contact and ## Education placeholders only.
     """
+    strings = LANGS[lang]
     lines: list[str] = []
 
-    lines.append(f"# Resume — {_escape(draft.subject)}")
+    lines.append(f"# {strings['title_resume']} — {_escape(draft.subject)}")
     lines.append("")
 
     if not draft.selected:
-        lines.append(_NO_BULLETS_NOTICE)
+        lines.append(strings["no_grounded_bullets"])
         lines.append("")
-        lines.append("## Contact")
+        lines.append(f"## {strings['section_contact']}")
         lines.append("")
-        lines.append(_CONTACT_PLACEHOLDER)
+        lines.append(strings["contact_placeholder"])
         lines.append("")
-        lines.append("## Education")
+        lines.append(f"## {strings['section_education']}")
         lines.append("")
-        lines.append(_EDUCATION_PLACEHOLDER)
+        lines.append(strings["education_placeholder"])
         lines.append("")
         return "\n".join(lines)
 
@@ -50,11 +48,13 @@ def render_resume(draft: ResumeDraft, *, show_refs: bool = False) -> str:
     n_repos = count_repos_from_refs(ref for sc in draft.selected for ref in sc.claim.evidence_refs)
     m = len(draft.jd_keywords_matched)
     t = draft.jd_keywords_total
-    lines.append(f"{n_selected} contributions · {n_repos} repos · {m}/{t} JD keywords")
+    lines.append(
+        f"{n_selected} {strings['stat_contributions']} · {n_repos} {strings['stat_repos']} · {m}/{t} {strings['stat_jd_keywords']}"
+    )
     lines.append("")
 
     # --- Experience section ---
-    lines.append("## Experience")
+    lines.append(f"## {strings['section_experience']}")
     lines.append("")
 
     # Group claims: iterate draft.selected in order to preserve within-group order
@@ -70,7 +70,9 @@ def render_resume(draft: ResumeDraft, *, show_refs: bool = False) -> str:
         sorted_groups.append(("Other", other_scs))
 
     for group_name, scs in sorted_groups:
-        lines.append(f"## {group_name}")
+        # Translate "Other" sentinel; tech names (Python, Go) are language-neutral.
+        display_name = strings["group_other"] if group_name == "Other" else group_name
+        lines.append(f"## {display_name}")
         lines.append("")
         for sc in scs:
             if show_refs:
@@ -83,23 +85,23 @@ def render_resume(draft: ResumeDraft, *, show_refs: bool = False) -> str:
     # --- Skills section ---
     selected_refs = {ref for sc in draft.selected for ref in sc.claim.evidence_refs}
     selected_evidence = (ev for ev in draft.evidence_by_ref.values() if ev.ref in selected_refs)
-    langs = stack_languages(selected_evidence)
-    lines.append("## Skills")
+    detected_langs = stack_languages(selected_evidence)
+    lines.append(f"## {strings['section_skills']}")
     lines.append("")
-    if langs:
-        lines.append(", ".join(sorted(langs)))
+    if detected_langs:
+        lines.append(", ".join(sorted(detected_langs)))
     else:
-        lines.append("_no stack detected_")
+        lines.append(strings["no_stack_detected"])
     lines.append("")
 
     # --- Placeholder sections ---
-    lines.append("## Contact")
+    lines.append(f"## {strings['section_contact']}")
     lines.append("")
-    lines.append(_CONTACT_PLACEHOLDER)
+    lines.append(strings["contact_placeholder"])
     lines.append("")
-    lines.append("## Education")
+    lines.append(f"## {strings['section_education']}")
     lines.append("")
-    lines.append(_EDUCATION_PLACEHOLDER)
+    lines.append(strings["education_placeholder"])
     lines.append("")
 
     return "\n".join(lines)

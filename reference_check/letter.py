@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+from portfolio.i18n import language_name
 from portfolio.model import Portfolio
 from portfolio.narrative import Runner
 
@@ -30,7 +31,7 @@ class LetterDraft:
     rejected_paragraphs: list[LetterParagraph] = field(default_factory=list)
 
 
-def build_letter_prompt(portfolio: Portfolio) -> str:
+def build_letter_prompt(portfolio: Portfolio, lang: str = "en") -> str:
     """Build the recommendation-letter prompt from grounded portfolio claims.
 
     Gives the model ONLY the grounded claims and the exact ref strings it may
@@ -58,7 +59,8 @@ def build_letter_prompt(portfolio: Portfolio) -> str:
         f"Write 2-4 body paragraphs for a recommendation letter. Each paragraph MUST cite "
         f"at least one ref from the ALLOWED REFS list. Output STRICT JSON only — a list of "
         f"objects with keys: text (string, the paragraph body), evidence_refs (list of exact "
-        f"ref strings from ALLOWED REFS). No prose, no code fences, JSON array only."
+        f"ref strings from ALLOWED REFS). No prose, no code fences, JSON array only.\n\n"
+        f"Write all prose in {language_name(lang)}."
     )
 
 
@@ -120,7 +122,7 @@ def ground_paragraphs(
     return grounded, rejected
 
 
-def build_letter(portfolio: Portfolio, runner: Runner) -> LetterDraft:
+def build_letter(portfolio: Portfolio, runner: Runner, lang: str = "en") -> LetterDraft:
     """Build a grounded recommendation letter from a grounded Portfolio.
 
     If portfolio.claims is empty (zero grounded evidence), returns a LetterDraft
@@ -130,7 +132,7 @@ def build_letter(portfolio: Portfolio, runner: Runner) -> LetterDraft:
     if not portfolio.claims:
         return LetterDraft(subject=portfolio.subject)
 
-    prompt = build_letter_prompt(portfolio)
+    prompt = build_letter_prompt(portfolio, lang=lang)
     raw_output = runner(prompt)
     paragraphs = parse_paragraphs(raw_output)
     grounded, rejected = ground_paragraphs(paragraphs, portfolio)
