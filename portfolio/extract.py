@@ -17,6 +17,88 @@ from .model import Evidence
 _PR_FIELDS = "number,title,url,mergedAt,files,additions,deletions"
 _SEARCH_FIELDS = "number,title,url,repository"
 
+# ---------------------------------------------------------------------------
+# Evidence denylist — pinned in code; a model NEVER contributes to this set.
+# Same design principle as _EXT_TO_LANG in rating/profile.py.
+# ---------------------------------------------------------------------------
+
+# (a) Denied directory segment names: applied at ANY depth.
+#     A path is denied iff any "/"-separated segment (after stripping an optional
+#     "<owner>/<repo>:" prefix on the first ":") exactly equals one of these names.
+#     Note: "build.gradle" ≠ "build" — a filename segment is NOT a directory segment.
+_DENIED_DIR_SEGMENTS: frozenset[str] = frozenset(
+    {
+        # Build output
+        "target",
+        "build",
+        "dist",
+        "out",
+        "bin",
+        ".next",
+        "__pycache__",
+        # Vendored dependencies
+        "node_modules",
+        "vendor",
+        ".venv",
+        # IDE / tooling metadata directory names
+        ".settings",
+        ".idea",
+        ".vscode",
+    }
+)
+
+# (b) Denied exact metadata filenames: applied to the FINAL path segment only.
+_DENIED_EXACT_FILENAMES: frozenset[str] = frozenset({".classpath", ".project", ".springBeans"})
+
+# (b) Denied filename suffix: applied to the FINAL path segment.
+_DENIED_FILENAME_SUFFIX: str = ".iml"
+
+
+def _is_denied_ref(ref: str) -> bool:
+    """Return True iff the given file ref should be excluded from Evidence(kind="file").
+
+    Committed deterministic rule (single rule, non-ambiguous):
+      Strip an optional "<owner>/<repo>:" prefix (split on FIRST ":" only).
+      Split the remaining path on "/". Deny iff:
+      (a) any segment exactly equals a denied directory segment name, at ANY depth;
+      (b) the final segment exactly matches a denied metadata filename or ends with ".iml";
+      (c) the segment sequence contains "META-INF" immediately followed by "maven", at
+          any depth;
+      (d) any segment equals "m2e-wtp", at any depth.
+
+    Does NOT over-match on filenames: "src/components/target.ts" → KEPT ("target.ts" ≠
+    "target"); root-level "build.gradle" → KEPT ("build.gradle" ≠ "build").
+    "src/build/page.tsx" → DROPPED: the "build" dir segment matches at depth 1.
+    """
+    # Strip optional "<owner>/<repo>:" prefix on the FIRST ":"
+    path = ref.partition(":")[2] if ":" in ref else ref
+
+    segments = path.split("/")
+    if not segments:
+        return False
+
+    final = segments[-1]
+
+    # (b) exact metadata filename or *.iml suffix on the final segment
+    if final in _DENIED_EXACT_FILENAMES or final.endswith(_DENIED_FILENAME_SUFFIX):
+        return True
+
+    # (a) any segment exactly equals a denied directory segment name
+    for seg in segments:
+        if seg in _DENIED_DIR_SEGMENTS:
+            return True
+
+    # (c) "META-INF" immediately followed by "maven" at any depth
+    for i in range(len(segments) - 1):
+        if segments[i] == "META-INF" and segments[i + 1] == "maven":
+            return True
+
+    # (d) any segment equals "m2e-wtp" at any depth
+    if "m2e-wtp" in segments:
+        return True
+
+    return False
+
 
 def _run_gh(args: list[str]) -> str:
     proc = subprocess.run(
@@ -51,7 +133,7 @@ def parse_pr_evidence(pr_json: str) -> list[Evidence]:
         )
         for f in pr.get("files") or []:
             path = f.get("path")
-            if path and path not in seen_files:
+            if path and path not in seen_files and not _is_denied_ref(path):
                 seen_files.add(path)
                 evidence.append(Evidence(kind="file", ref=path, detail=f"changed in PR#{num}"))
     return evidence
@@ -112,7 +194,8 @@ def parse_authored_pr_evidence(
             path = f.get("path")
             if path:
                 file_ref = f"{name_with_owner}:{path}"
-                evidence.append(Evidence(kind="file", ref=file_ref, detail=f"changed in {pr_ref}"))
+                if not _is_denied_ref(file_ref):
+                    evidence.append(Evidence(kind="file", ref=file_ref, detail=f"changed in {pr_ref}"))
     return evidence
 
 
