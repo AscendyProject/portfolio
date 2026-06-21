@@ -13,11 +13,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from portfolio.cli import run  # noqa: E402
-from portfolio.grounding import check_claims  # noqa: E402
-from portfolio.model import Claim, Evidence, Portfolio  # noqa: E402
-from portfolio.sources import SourceRequest, resolve_source  # noqa: E402
-from portfolio.store import (  # noqa: E402
+from portfolio.cli import run  # noqa: E402 — after sys.path setup per test-conventions
+from portfolio.grounding import check_claims  # noqa: E402 — after sys.path setup per test-conventions
+from portfolio.model import Claim, Evidence, Portfolio  # noqa: E402 — after sys.path setup per test-conventions
+from portfolio.sources import SourceRequest, resolve_source  # noqa: E402 — after sys.path setup per test-conventions
+from portfolio.store import (  # noqa: E402 — after sys.path setup per test-conventions
     SCHEMA_VERSION,
     PortfolioStoreError,
     merge_portfolios,
