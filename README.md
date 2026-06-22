@@ -152,6 +152,24 @@ local filesystem path to a plain-text file **or** an `http(s)` URL to a job post
 > developer's grounded evidence covers the JD's keywords; depth of experience,
 > years, or domain judgment are not modeled.
 
+**Batch mode (`--jd-dir`):** pass a directory instead of a single JD file to score
+the same portfolio against every `*.txt` and `*.md` file in the directory (top-level
+only) and emit a ranked Markdown table (`JD | Grade | Score | Coverage% | Top Gaps`)
+sorted best-first (Score ↓, Coverage% ↓, JD basename ↑). The portfolio is built
+**once**; only the scoring step repeats per JD.
+
+```
+python -m fit --source-type github --source <url> --author <handle> --jd-dir ./jd-files/
+```
+
+`--jd` and `--jd-dir` are mutually exclusive; supplying both or neither exits with
+code 2 and a one-line error message. An empty directory (or one with no `*.txt` /
+`*.md` files) also exits with code 2.
+
+**Batch-mode `--lang` default:** when `--jd-dir` is used and `--lang` is omitted,
+the output language is `en`. There is no auto-detection from JD contents in batch
+mode. An explicit `--lang ko` (or `--lang en`) overrides the default.
+
 The `/fit` slash command is the interactive front door; `--out <file>` writes to
 a file instead of stdout.
 
