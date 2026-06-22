@@ -1,0 +1,32 @@
+# Resolution of plan_review findings (task-023)
+
+All four findings resolved by tightening `outcome.md` (not by re-planning):
+
+- **PR-001 (blocker — missing Verification block).** Added the parseable
+  `## Verification` fenced-yaml block (`bash .redteam/scripts/verify.sh`) ahead of
+  `## Verification hooks`. Confirmed it parses.
+
+- **PR-002 (`sales` omitted).** Added `sales` to the `NON_CODE_AXES` list (stored
+  in stemmed form) and to the membership assertions — it is the non-codeable axis
+  explicitly named in issue #37.
+
+- **PR-003 (`ScoreResult` new field breaks existing constructors).** Specified the
+  field as `non_code_requirements: set[str] = field(default_factory=set)` — a
+  defaulted dataclass field so every existing `ScoreResult(...)` site stays valid
+  without edits.
+
+- **PR-004 (non-hermetic deps check).** The "pyproject runtime-deps unchanged"
+  assertion is moved to a REVIEWER check against the branch diff (not a pytest
+  reading VCS state). The hermetic forbidden-stemming-package grep test stays.
+
+Also noting the planner's flagged Part C decision (Risks): the committed choice is
+**exclude non-codeable axes from BOTH coverage numerator and denominator** (and
+surface them in `ScoreResult.non_code_requirements` as data) — this is the intended
+behavior, not the "still counted, separate section" alternative. Scope stays
+deterministic-only (semantic matching, weighting, batch/providers are separate
+follow-ups).
+
+Proceeding to implementation against the revised `outcome.md`; review_code will
+verify the actual implementation.
+
+USER_DECISION: APPROVE
