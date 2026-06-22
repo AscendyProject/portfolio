@@ -440,15 +440,56 @@ def test_jd_dir_determinism(tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
+# Done-when: single-JD byte-identity golden (IR-003)
+# ---------------------------------------------------------------------------
+
+
+def test_single_jd_golden(tmp_path, capsys):
+    """'A golden file pair captured from the BASE branch (pre-change) is checked in at
+    tests/golden/fit_single_jd/stdout.md and stderr.txt. A test runs fit.cli.run(...)
+    on the same --jd <path> argv that produced the golden and asserts
+    captured.out == golden_stdout AND captured.err == golden_stderr, byte-for-byte.'"""
+    golden_dir = Path(__file__).resolve().parent / "golden" / "fit_single_jd"
+    golden_stdout = (golden_dir / "stdout.md").read_text(encoding="utf-8")
+    golden_stderr = (golden_dir / "stderr.txt").read_text(encoding="utf-8")
+
+    jd_path = tmp_path / "jd.txt"
+    jd_path.write_text("python backend engineer", encoding="utf-8")
+
+    argv = [
+        "--source-type",
+        "github",
+        "--source",
+        "https://github.com/owner/repo",
+        "--author",
+        "alice",
+        "--jd",
+        str(jd_path),
+    ]
+
+    code = run(
+        argv,
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_make_grader_runner(80),
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out == golden_stdout, "stdout must be byte-identical to the base-branch golden"
+    assert captured.err == golden_stderr, "stderr must be byte-identical to the base-branch golden"
+
+
+# ---------------------------------------------------------------------------
 # Done-when: batch web-source passes fetcher through (IR-001)
 # ---------------------------------------------------------------------------
 
 
 def test_batch_fetcher_passed_through(tmp_path, capsys):
-    """'Batch mode must pass the injected fetcher through _run_batch, matching
-    single-JD behavior. A counting fetcher is injected; if --source-type github
-    is used the fetcher is not called, but the SourceRequest must carry it
-    (no AttributeError / None-call on the fetcher seam).'
+    """'Batch mode must thread the injected fetcher through _run_batch into the
+    SourceRequest/resolve path, matching single-JD behavior. With --source-type web
+    (the source type that actually invokes the fetcher during extraction), a counting
+    fetcher MUST be called; if batch mode dropped the fetcher (fetcher=None), extract()
+    would crash on a None call instead.'
     Traces to IR-001: batch mode breaks --source-type web when fetcher=None."""
     (tmp_path / "jd.txt").write_text("python backend", encoding="utf-8")
 
@@ -456,19 +497,36 @@ def test_batch_fetcher_passed_through(tmp_path, capsys):
 
     def counting_fetcher(url: str) -> str:
         fetcher_calls.append(url)
-        return "<html>python backend</html>"
+        return "<html><head><title>Post</title></head><body>python backend</body></html>"
+
+    argv = [
+        "--source-type",
+        "web",
+        "--source",
+        "https://blog.example.com/post",
+        "--author",
+        "alice",
+        "--jd-dir",
+        str(tmp_path),
+        "--lang",
+        "en",
+    ]
 
     code = run(
-        _base_batch_argv(str(tmp_path), lang="en"),
+        argv,
         extractor=_fake_extractor,
         runner=_fake_runner,
         fetcher=counting_fetcher,
         grader_runner=_make_grader_runner(80),
     )
     capsys.readouterr()
-    # The key assertion: run() must not crash due to fetcher=None being passed
-    # to _run_batch. With the fix, fetcher is forwarded; exit code is 0.
     assert code == 0
+    # Discriminating assertion: the web source resolves extract() to fetcher(url);
+    # batch mode must have threaded the injected fetcher through SourceRequest, so
+    # the fetcher is actually invoked with the normalized article URL.
+    assert fetcher_calls == ["https://blog.example.com/post"], (
+        "batch mode must thread the injected fetcher through to the web source resolve path"
+    )
 
 
 # ---------------------------------------------------------------------------
