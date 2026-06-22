@@ -90,7 +90,9 @@ def run(
 
     # ── Batch mode (--jd-dir) ─────────────────────────────────────────────────
     if args.jd_dir is not None:
-        return _run_batch(args, extractor=extractor, runner=runner, visibility_lookup=visibility_lookup)
+        return _run_batch(
+            args, extractor=extractor, runner=runner, fetcher=fetcher, visibility_lookup=visibility_lookup
+        )
 
     # ── Single-JD mode (--jd) — original path, byte-identical output ─────────
     # Load the JD (file path or http(s) URL) — fail early with a clean error.
@@ -191,6 +193,7 @@ def _run_batch(
     *,
     extractor,
     runner,
+    fetcher,
     visibility_lookup,
 ) -> int:
     """Execute batch mode: score the portfolio against every JD in --jd-dir."""
@@ -219,7 +222,7 @@ def _run_batch(
     try:
         resolved = resolve_source(
             args.source_type,
-            SourceRequest(source=args.source, author=args.author, extractor=extractor, fetcher=None),
+            SourceRequest(source=args.source, author=args.author, extractor=extractor, fetcher=fetcher),
         )
     except UnsupportedSourceError as exc:
         print(str(exc), file=sys.stderr)
@@ -251,7 +254,14 @@ def _run_batch(
     # Score per JD; collect (basename, ScoreResult) pairs.
     batch_results: list[tuple[str, object]] = []
     for jd_path in jd_files:
-        jd_text = jd_path.read_text(encoding="utf-8")
+        try:
+            jd_text = jd_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"cannot read JD file {jd_path!r}: {exc}", file=sys.stderr)
+            return 1
+        except UnicodeError as exc:
+            print(f"cannot decode JD file {jd_path!r}: {exc}", file=sys.stderr)
+            return 1
         score_result = score_fit(portfolio, jd_text)
         batch_results.append((jd_path.name, score_result))
 

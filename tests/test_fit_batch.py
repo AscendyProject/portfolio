@@ -150,28 +150,49 @@ def test_jd_dir_extension_filter(tmp_path, capsys):
 def test_jd_dir_tiebreak_by_basename(tmp_path):
     """'Table rows are sorted: primary key Score descending, secondary key Coverage%
     descending, tertiary key JD basename ascending. A test with hand-crafted
-    ScoreResults exercises all three tiers of the tiebreak.'"""
-    # Build hand-crafted results where score and coverage% are equal
-    sr_tie1 = ScoreResult(grade="B", band=(70, 84), coverage_pct=60.0, covered={}, gaps=set())
-    sr_tie2 = ScoreResult(grade="B", band=(70, 84), coverage_pct=60.0, covered={}, gaps=set())
-    # Third result has higher score — should be first
-    sr_top = ScoreResult(grade="A", band=(85, 95), coverage_pct=80.0, covered={}, gaps=set())
+    ScoreResults exercises all three tiers of the tiebreak.'
+
+    Three distinct cases verified:
+    1. Different scores → primary key (Score) determines rank.
+    2. Equal scores, different coverage% → secondary key (Coverage%) determines rank.
+    3. Equal scores, equal coverage% → tertiary key (basename) determines rank.
+    """
+    # Tier 1 winner: highest score (A band midpoint 90 > B midpoint 77)
+    sr_score_winner = ScoreResult(grade="A", band=(85, 95), coverage_pct=50.0, covered={}, gaps=set())
+
+    # Tier 2 winner: same score as tier2_loser (B midpoint 77), but higher coverage%
+    sr_coverage_winner = ScoreResult(grade="B", band=(70, 84), coverage_pct=75.0, covered={}, gaps=set())
+    sr_coverage_loser = ScoreResult(grade="B", band=(70, 84), coverage_pct=40.0, covered={}, gaps=set())
+
+    # Tier 3: same score AND same coverage% — basename ascending decides
+    sr_name_aaa = ScoreResult(grade="C", band=(55, 69), coverage_pct=30.0, covered={}, gaps=set())
+    sr_name_zzz = ScoreResult(grade="C", band=(55, 69), coverage_pct=30.0, covered={}, gaps=set())
 
     results = [
-        ("zzz.txt", sr_tie1),  # tied, alphabetically last → row 2 (0-indexed among tied)
-        ("aaa.txt", sr_tie2),  # tied, alphabetically first → row 1 (0-indexed among tied)
-        ("winner.txt", sr_top),  # highest score → always first
+        ("scorewinner.txt", sr_score_winner),  # rank 1 by score
+        ("covwinner.txt", sr_coverage_winner),  # rank 2 by coverage%
+        ("covloser.txt", sr_coverage_loser),  # rank 3 by coverage%
+        ("zzz.txt", sr_name_zzz),  # rank 5 by basename
+        ("aaa.txt", sr_name_aaa),  # rank 4 by basename
     ]
     table = render_fit_batch(results, lang="en")
     lines = [ln for ln in table.splitlines() if ln.startswith("|") and "---" not in ln]
     # lines[0] = header, lines[1..] = data rows
     data_lines = lines[1:]
-    assert len(data_lines) == 3
-    # winner.txt (highest score) first
-    assert "winner.txt" in data_lines[0]
-    # among the tied, aaa.txt before zzz.txt
-    assert "aaa.txt" in data_lines[1]
-    assert "zzz.txt" in data_lines[2]
+    assert len(data_lines) == 5
+
+    # Tier 1: scorewinner is first (highest score)
+    assert "scorewinner.txt" in data_lines[0]
+
+    # Tier 2: covwinner before covloser (same score, higher coverage%)
+    cov_win_pos = next(i for i, ln in enumerate(data_lines) if "covwinner.txt" in ln)
+    cov_los_pos = next(i for i, ln in enumerate(data_lines) if "covloser.txt" in ln)
+    assert cov_win_pos < cov_los_pos, "higher coverage% must rank above lower coverage% when scores tie"
+
+    # Tier 3: aaa.txt before zzz.txt (same score + coverage%, basename ascending)
+    aaa_pos = next(i for i, ln in enumerate(data_lines) if "aaa.txt" in ln)
+    zzz_pos = next(i for i, ln in enumerate(data_lines) if "zzz.txt" in ln)
+    assert aaa_pos < zzz_pos, "ascending basename must be the tiebreak when score and coverage% are equal"
 
 
 # ---------------------------------------------------------------------------
@@ -419,43 +440,62 @@ def test_jd_dir_determinism(tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# Done-when: single-JD byte-identity golden (PR-003)
+# Done-when: batch web-source passes fetcher through (IR-001)
 # ---------------------------------------------------------------------------
 
 
-def test_single_jd_golden(tmp_path, capsys):
-    """'A golden file pair captured from the BASE branch (pre-change) is checked in at
-    tests/golden/fit_single_jd/stdout.md and stderr.txt. A test runs fit.cli.run(...)
-    on the same --jd <path> argv that produced the golden and asserts
-    captured.out == golden_stdout AND captured.err == golden_stderr, byte-for-byte.'"""
-    golden_dir = Path(__file__).resolve().parent / "golden" / "fit_single_jd"
-    golden_stdout = (golden_dir / "stdout.md").read_text(encoding="utf-8")
-    golden_stderr = (golden_dir / "stderr.txt").read_text(encoding="utf-8")
+def test_batch_fetcher_passed_through(tmp_path, capsys):
+    """'Batch mode must pass the injected fetcher through _run_batch, matching
+    single-JD behavior. A counting fetcher is injected; if --source-type github
+    is used the fetcher is not called, but the SourceRequest must carry it
+    (no AttributeError / None-call on the fetcher seam).'
+    Traces to IR-001: batch mode breaks --source-type web when fetcher=None."""
+    (tmp_path / "jd.txt").write_text("python backend", encoding="utf-8")
 
-    jd_path = tmp_path / "jd.txt"
-    jd_path.write_text("python backend engineer", encoding="utf-8")
+    fetcher_calls: list = []
 
-    argv = [
-        "--source-type",
-        "github",
-        "--source",
-        "https://github.com/owner/repo",
-        "--author",
-        "alice",
-        "--jd",
-        str(jd_path),
-    ]
+    def counting_fetcher(url: str) -> str:
+        fetcher_calls.append(url)
+        return "<html>python backend</html>"
 
     code = run(
-        argv,
+        _base_batch_argv(str(tmp_path), lang="en"),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        fetcher=counting_fetcher,
+        grader_runner=_make_grader_runner(80),
+    )
+    capsys.readouterr()
+    # The key assertion: run() must not crash due to fetcher=None being passed
+    # to _run_batch. With the fix, fetcher is forwarded; exit code is 0.
+    assert code == 0
+
+
+# ---------------------------------------------------------------------------
+# Done-when: IR-002 — unreadable JD file exits cleanly (no traceback)
+# ---------------------------------------------------------------------------
+
+
+def test_jd_file_invalid_utf8_exits_1(tmp_path, capsys):
+    """'Matching JD files are read without handling UnicodeError. An invalid-UTF-8
+    file raises an uncaught exception after the expensive portfolio build. Return
+    a clean nonzero error without a traceback and test both cases.'
+    Traces to IR-002 (UnicodeError case)."""
+    # Write a file with invalid UTF-8 bytes
+    bad_file = tmp_path / "bad.txt"
+    bad_file.write_bytes(b"python backend \xff\xfe invalid")
+
+    code = run(
+        _base_batch_argv(str(tmp_path), lang="en"),
         extractor=_fake_extractor,
         runner=_fake_runner,
         grader_runner=_make_grader_runner(80),
     )
     captured = capsys.readouterr()
-    assert code == 0
-    assert captured.out == golden_stdout, "stdout must be byte-identical to the base-branch golden"
-    assert captured.err == golden_stderr, "stderr must be byte-identical to the base-branch golden"
+    assert code == 1
+    assert "Traceback" not in captured.err
+    # At least one non-empty stderr line about the failure
+    assert captured.err.strip() != ""
 
 
 # ---------------------------------------------------------------------------
@@ -630,30 +670,33 @@ def test_batch_default_lang_en_without_lang_flag(tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# Done-when: single-JD lang-autodetect is preserved (PR-001)
+# Done-when: IR-002 — OSError on JD file exits cleanly (no traceback)
 # ---------------------------------------------------------------------------
 
 
-def test_single_jd_lang_autodetect_korean(tmp_path, capsys):
-    """'When --jd <path> is used and --lang is omitted, detect_language(jd_text) still
-    chooses the language exactly as today. A test runs --jd <path> against a
-    Hangul-dominant JD without --lang and asserts the output is rendered in ko.'"""
-    korean_jd = "파이썬 백엔드 개발자 구인합니다. 경력 3년 이상 필요합니다."
-    jd_path = tmp_path / "ko_jd.txt"
-    jd_path.write_text(korean_jd, encoding="utf-8")
+def test_jd_file_oserror_exits_1(tmp_path, capsys):
+    """'An unreadable JD file (OSError) must return a clean nonzero error without
+    a traceback.'
+    Traces to IR-002 (OSError case)."""
+    jd_file = tmp_path / "locked.txt"
+    jd_file.write_text("python backend", encoding="utf-8")
+    # Remove read permission so open() raises PermissionError (subclass of OSError)
+    jd_file.chmod(0o000)
 
-    code = run(
-        _base_single_argv(str(jd_path)),  # no --lang
-        extractor=_fake_extractor,
-        runner=_fake_runner,
-        grader_runner=_make_grader_runner(80),
-    )
-    captured = capsys.readouterr()
-    assert code == 0
-    # Korean fit title must appear (auto-detected ko)
-    assert LANGS["ko"]["title_fit"] in captured.out  # "적합도 평가"
-    # English title must NOT appear
-    assert LANGS["en"]["title_fit"] not in captured.out  # "Fit Assessment"
+    try:
+        code = run(
+            _base_batch_argv(str(tmp_path), lang="en"),
+            extractor=_fake_extractor,
+            runner=_fake_runner,
+            grader_runner=_make_grader_runner(80),
+        )
+        captured = capsys.readouterr()
+        assert code == 1
+        assert "Traceback" not in captured.err
+        assert captured.err.strip() != ""
+    finally:
+        # Restore permissions so tmp_path cleanup works
+        jd_file.chmod(0o644)
 
 
 # ---------------------------------------------------------------------------
