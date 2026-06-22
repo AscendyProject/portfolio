@@ -54,6 +54,105 @@ STOPWORDS: frozenset[str] = frozenset(
     }
 )
 
+# ── JD meta-line patterns (Part A.1) ─────────────────────────────────────────
+# Compiled regexes that match whole preamble/header lines to strip before
+# tokenizing. Each pattern matches the full line (after strip).
+JD_META_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Matches the harness-style preamble:
+    #   "Extracted job description for resume/fit keyword matching"
+    re.compile(
+        r"^extracted\s+job\s+description\s+for\s+resume\s*/\s*fit\s+keyword\s+matching$",
+        re.IGNORECASE,
+    ),
+    # Matches a generic <label>: header line (label only, nothing else on the line)
+    re.compile(
+        r"^(job\s+description|keywords?|resume|portfolio)\s*:\s*$",
+        re.IGNORECASE,
+    ),
+)
+
+# ── JD meta-token stopwords (Part A.2) ────────────────────────────────────────
+# Tokens to drop even when they appear mid-sentence in a requirement line.
+# Importable from resume.select.
+JD_META_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "job",
+        "description",
+        "keywords",
+        "keyword",
+        "resume",
+        "portfolio",
+        "fit",
+        "com",
+        "extracted",
+        "matching",
+    }
+)
+
+
+# ── Private helpers ───────────────────────────────────────────────────────────
+
+
+def _strip_meta_lines(text: str) -> str:
+    """Drop lines matching any JD_META_LINE_PATTERNS; join survivors with newline."""
+    survivors = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if any(pat.match(stripped) for pat in JD_META_LINE_PATTERNS):
+            continue
+        survivors.append(line)
+    return "\n".join(survivors)
+
+
+def _stem(token: str) -> str:
+    """Deterministic ASCII suffix stemmer.
+
+    Non-ASCII tokens (e.g. Korean Hangul) are returned unchanged.
+    Only handles the specific suffix pairs named in the brief.
+    Pure, stdlib-only, no third-party dependencies.
+    """
+    # Pass through non-ASCII tokens unchanged
+    if not token.isascii():
+        return token
+
+    t = token.lower()
+
+    # Ordered from longest to shortest suffix to avoid over-stripping.
+    # -ing → base (deploying → deploy, orchestrating → orchestrat)
+    if t.endswith("ing"):
+        stem = t[:-3]
+        if len(stem) >= 3:
+            return stem
+        return t
+
+    # -ed → base (deployed → deploy, orchestrated → orchestrat)
+    if t.endswith("ed"):
+        stem = t[:-2]
+        if len(stem) >= 3:
+            return stem
+        return t
+
+    # -ate → base (orchestrate → orchestrat)
+    # Strip trailing 'e' from '-ate' endings so that "orchestrate" / "orchestrated"
+    # / "orchestrating" all collapse to the same stem.
+    if t.endswith("ate"):
+        stem = t[:-1]  # strip the 'e', keep 'at'
+        if len(stem) >= 4:
+            return stem
+        return t
+
+    # -s → base (migrations → migration, containers → container, services → service,
+    #             deploys → deploy)
+    # Block: words ending in '-tes' are typically loan words / proper nouns (e.g.
+    # "kubernetes"), not English plurals — skip the strip to preserve them intact.
+    if t.endswith("s") and not t.endswith("ss") and not t.endswith("tes"):
+        stem = t[:-1]
+        if len(stem) >= 3:
+            return stem
+        return t
+
+    return t
+
 
 # ── Tokenizer ─────────────────────────────────────────────────────────────────
 def jd_keywords(jd_text: str) -> set[str]:
@@ -66,11 +165,33 @@ def jd_keywords(jd_text: str) -> set[str]:
     str.lower() (Latin letters are case-folded; Korean is caseless and passes
     through unchanged). Drops tokens in STOPWORDS; drops empty tokens.
 
+    Part A.1: strips meta/preamble lines before tokenizing.
+    Part A.2: drops JD_META_STOPWORDS tokens, len<2 tokens, pure-digit tokens.
+    Part B: applies _stem to each surviving token.
+
     Behaviour on pure-ASCII English input is byte-identical to the prior
     implementation (re.split(r"[^a-z0-9]+", text.lower())).
     """
-    tokens = re.findall(r"[^\W_]+", jd_text, re.UNICODE)
-    return {t.lower() for t in tokens if t.lower() not in STOPWORDS}
+    text = _strip_meta_lines(jd_text)
+    tokens = re.findall(r"[^\W_]+", text, re.UNICODE)
+    result = set()
+    for t in tokens:
+        low = t.lower()
+        # Drop STOPWORDS
+        if low in STOPWORDS:
+            continue
+        # Drop JD_META_STOPWORDS
+        if low in JD_META_STOPWORDS:
+            continue
+        # Drop len < 2
+        if len(low) < 2:
+            continue
+        # Drop pure-digit tokens
+        if low.isdigit():
+            continue
+        # Apply stemming
+        result.add(_stem(low))
+    return result
 
 
 def _claim_tokens(claim: Claim) -> set[str]:
