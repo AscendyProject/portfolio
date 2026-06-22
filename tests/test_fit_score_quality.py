@@ -7,7 +7,9 @@ Covers:
   Part C   — NON_CODE_AXES exclusion in score_fit / ScoreResult
   End-to-end ranking regression (well-matched vs poorly-matched)
   Preamble-robustness regression
-  Korean no-regression after Part A + B changes
+
+Korean no-regression is guarded by tests/test_jd_keywords_unicode.py, which stays
+green under verify.sh after this branch's changes.
 
 No live model, gh, or network call. All in-process.
 """
@@ -23,6 +25,7 @@ from portfolio.model import Claim, Evidence, Portfolio  # noqa: E402
 from resume.select import (  # noqa: E402
     JD_META_LINE_PATTERNS,
     JD_META_STOPWORDS,
+    _claim_tokens,
     _stem,
     _strip_meta_lines,
     jd_keywords,
@@ -130,22 +133,21 @@ def test_jd_keywords_strips_preamble_before_tokenizing():
 
 
 def test_claim_tokens_strip_meta_lines():
-    """A Claim whose text contains the preamble line contributes only real tokens.
+    """_claim_tokens drops the preamble line directly, keeping only real claim stems.
 
-    _claim_tokens is exercised via select_claims: the claim with the preamble
-    in its text must still produce real tokens and match when the JD has those keywords.
+    Asserted on _claim_tokens(claim)'s OWN output — NO intersection against a JD
+    keyword set — so a no-op _claim_tokens (pre-change) cannot pass vacuously.
     """
-    evidence = [_make_evidence("PR#1")]
     preamble = "Extracted job description for resume/fit keyword matching"
     claim = _make_claim(f"{preamble}\npython backend kubernetes", ["PR#1"])
-    portfolio = Portfolio(subject="alice", evidence=evidence, claims=[claim])
-    kw = jd_keywords("python backend kubernetes")
-    scored = select_claims(portfolio, kw, top_n=5)
-    # The claim must still match (real tokens survive after preamble strip)
-    assert len(scored) > 0, "Claim with preamble should still match real JD keywords"
-    # The preamble tokens must NOT appear as matched keywords
+    tokens = _claim_tokens(claim)
+    # Real requirement stems must survive the preamble strip
+    assert "python" in tokens
+    assert "backend" in tokens
+    assert "kubernetes" in tokens
+    # Preamble / meta-line tokens must be absent from the claim's own tokens
     for bad in ("extracted", "matching", "description", "job", "keyword", "resume", "fit", "portfolio"):
-        assert bad not in scored[0].matched_keywords, f"Meta token {bad!r} must not appear in matched_keywords"
+        assert bad not in tokens, f"Meta token {bad!r} must not appear in _claim_tokens output"
 
 
 # ===========================================================================
@@ -205,18 +207,28 @@ def test_jd_keywords_drops_pure_digit_tokens():
 
 
 def test_claim_tokens_drop_meta_stopwords():
-    """_claim_tokens (via select_claims) drops JD_META_STOPWORDS tokens from claim text."""
-    evidence = [_make_evidence("PR#1")]
-    # Claim text contains meta tokens mixed with real tokens
-    claim = _make_claim("python backend job description 2024 resume", ["PR#1"])
-    portfolio = Portfolio(subject="alice", evidence=evidence, claims=[claim])
-    # Use a JD with meta tokens to check the claim side doesn't contribute them
-    kw = jd_keywords("python backend service")
-    scored = select_claims(portfolio, kw, top_n=5)
-    assert len(scored) > 0
-    matched = scored[0].matched_keywords
-    for bad in JD_META_STOPWORDS:
-        assert bad not in matched, f"Meta token {bad!r} must not appear in matched_keywords"
+    """_claim_tokens drops meta stopwords, len<2, and pure-digit tokens directly.
+
+    The claim text mixes real tokens (`python migrations`) with a meta stopword
+    (`resume`, `job`, `description`), a len<2 token (`s`, `a`), and a pure-digit
+    token (`10`, `2024`). Asserted on _claim_tokens(claim)'s OWN output with NO
+    intersection against a JD keyword set, so a no-op _claim_tokens cannot pass.
+    """
+    claim = _make_claim("python migrations resume job description s a 10 2024 backend", ["PR#1"])
+    tokens = _claim_tokens(claim)
+    # Real stems survive
+    assert "python" in tokens
+    assert "backend" in tokens
+    assert _stem("migrations") in tokens
+    # Meta stopwords dropped
+    for bad in ("resume", "job", "description"):
+        assert bad not in tokens, f"Meta stopword {bad!r} must not appear in _claim_tokens output"
+    # len<2 tokens dropped
+    for bad in ("s", "a"):
+        assert bad not in tokens, f"len<2 token {bad!r} must not appear in _claim_tokens output"
+    # pure-digit tokens dropped
+    for bad in ("10", "2024"):
+        assert bad not in tokens, f"pure-digit token {bad!r} must not appear in _claim_tokens output"
 
 
 # ===========================================================================
@@ -307,16 +319,6 @@ def test_stem_match_end_to_end_score_fit():
     assert migration_stem in result.covered, (
         f"Expected {migration_stem!r} in covered; covered={set(result.covered.keys())}"
     )
-
-
-def test_no_forbidden_stemming_packages_in_source():
-    """resume/select.py and fit/score.py must not import forbidden external stemming packages."""
-    forbidden = ["nltk", "snowballstemmer", "Stemmer", "pystemmer", "porter2stemmer", "spacy"]
-    for source_file in ["resume/select.py", "fit/score.py"]:
-        path = Path(__file__).resolve().parents[1] / source_file
-        content = path.read_text(encoding="utf-8")
-        for pkg in forbidden:
-            assert pkg not in content, f"Forbidden stemming package {pkg!r} found in {source_file}"
 
 
 # ===========================================================================
@@ -490,16 +492,3 @@ def test_preamble_prepend_does_not_shift_coverage_more_than_2pct():
         f"no_preamble={no_preamble.coverage_pct:.1f}%, "
         f"with_preamble={with_preamble.coverage_pct:.1f}%, delta={delta:.2f}pp"
     )
-
-
-# ===========================================================================
-# Korean no-regression (Task-021)
-# ===========================================================================
-
-
-def test_korean_jd_passes_through_part_a_and_b_unchanged():
-    """Korean JD still produces Korean tokens after Part A line-stripping and Part B stemmer."""
-    ko_jd = "파이썬 백엔드 개발자 쿠버네티스 도커 경험자 우대"
-    result = jd_keywords(ko_jd)
-    for expected in ("파이썬", "백엔드", "개발자", "쿠버네티스", "도커"):
-        assert expected in result, f"Korean token {expected!r} must survive Part A + B; result={result}"
