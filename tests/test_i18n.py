@@ -635,10 +635,10 @@ def test_dimension_band_tables_complete():
     non-empty entry in each language's dimension_names / band_labels table, so no
     untranslated English heading or band label can leak into a localized render.
     """
-    from rating.profile import _BREADTH_BANDS, _DIVERSITY_BANDS, _VOLUME_BANDS
+    from rating.profile import _BREADTH_BANDS, _DIVERSITY_BANDS, _SCALE_BANDS, _VOLUME_BANDS
 
-    expected_dims = {"volume", "breadth", "stack_diversity"}
-    expected_bands = {b[0] for b in (*_VOLUME_BANDS, *_BREADTH_BANDS, *_DIVERSITY_BANDS)}
+    expected_dims = {"volume", "breadth", "stack_diversity", "scale"}
+    expected_bands = {b[0] for b in (*_VOLUME_BANDS, *_BREADTH_BANDS, *_DIVERSITY_BANDS, *_SCALE_BANDS)}
     for lang in ("en", "ko"):
         dimension_names = LANGS[lang]["dimension_names"]
         band_labels = LANGS[lang]["band_labels"]

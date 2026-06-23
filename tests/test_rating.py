@@ -39,16 +39,30 @@ def _make_portfolio(subject: str = "alice") -> Portfolio:
     volume=3 → Low (0 pts)
     breadth=5 → Narrow (0 pts)
     stack_diversity=4 (Python, JavaScript, Go, SQL) → Polyglot (2 pts)
-    total=2 → Grade B → score band 70–84
+    scale=median(160) → Large (2 pts)
+    total=4 → Grade B → score band 70–84
 
     All four diversity languages are real programming languages: non-code files
     (config/data/markup/docs) are excluded from stack diversity, so a Polyglot
-    fixture must use code languages.
+    fixture must use code languages. Each PR carries 160 changed lines so the
+    median lands in the Large scale band (keeping the fixture at grade B now that
+    scale is a fourth dimension).
     """
     evidence = [
-        Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature"),
-        Evidence(kind="pr", ref="PR#2", url="https://github.com/o/r/pull/2", detail="Fix bug"),
-        Evidence(kind="pr", ref="PR#3", url="https://github.com/o/r/pull/3", detail="Refactor"),
+        Evidence(
+            kind="pr",
+            ref="PR#1",
+            url="https://github.com/o/r/pull/1",
+            detail="Add feature",
+            additions=120,
+            deletions=40,
+        ),
+        Evidence(
+            kind="pr", ref="PR#2", url="https://github.com/o/r/pull/2", detail="Fix bug", additions=120, deletions=40
+        ),
+        Evidence(
+            kind="pr", ref="PR#3", url="https://github.com/o/r/pull/3", detail="Refactor", additions=120, deletions=40
+        ),
         Evidence(kind="file", ref="app/main.py"),
         Evidence(kind="file", ref="app/utils.py"),
         Evidence(kind="file", ref="web/app.js"),
@@ -235,6 +249,66 @@ def test_stack_diversity_counts_only_code_languages():
     assert result.dimensions["stack_diversity"].value == 2
     # the dimension cites only the code refs that contributed a counted language
     assert set(result.dimensions["stack_diversity"].evidence_refs) == {"app/main.py", "cmd/server.go"}
+
+
+# ---------------------------------------------------------------------------
+# Done-when: change-scale dimension (median changed lines per PR)
+# ---------------------------------------------------------------------------
+
+
+def test_scale_is_median_changed_lines_per_pr():
+    """scale value == median of (additions + deletions) over PR evidence."""
+    evidence = [
+        Evidence(kind="pr", ref="PR#1", additions=10, deletions=0),  # 10
+        Evidence(kind="pr", ref="PR#2", additions=100, deletions=100),  # 200
+        Evidence(kind="pr", ref="PR#3", additions=20, deletions=20),  # 40
+    ]
+    portfolio = Portfolio(subject="frank", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    # sorted changed lines: [10, 40, 200] → median 40
+    assert result.dimensions["scale"].value == 40
+    assert result.dimensions["scale"].band == "Medium"  # 30–149
+    # cites the PRs the median was taken over
+    assert set(result.dimensions["scale"].evidence_refs) == {"PR#1", "PR#2", "PR#3"}
+
+
+def test_scale_zero_when_no_prs():
+    """No PR evidence → scale 0 (Small), no crash on empty median."""
+    portfolio = Portfolio(subject="grace", evidence=[Evidence(kind="file", ref="a.py")], claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["scale"].value == 0
+    assert result.dimensions["scale"].band == "Small"
+
+
+def test_scale_large_band_lifts_grade():
+    """A small-but-substantial-PR developer (median 150+ changed lines) earns the
+    Large scale band's 2 points: here volume/breadth/diversity are all 0, so the
+    grade comes entirely from scale (2 pts → C), proving scale feeds the grade."""
+    evidence = [
+        Evidence(kind="pr", ref="PR#1", additions=300, deletions=50),  # 350
+        Evidence(kind="pr", ref="PR#2", additions=100, deletions=80),  # 180
+    ]
+    portfolio = Portfolio(subject="heidi", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["scale"].band == "Large"
+    assert result.dimensions["scale"].points == 2
+    assert result.grade == "C"  # 2 pts total → C under the 4-dimension rubric
+
+
+def test_grade_s_requires_all_four_dimensions_maxed():
+    """S (8 pts) is unreachable without the scale dimension: a developer who maxes
+    volume + breadth + diversity but has trivial PRs tops out at A, not S."""
+    evidence = [Evidence(kind="pr", ref=f"PR#{i}", additions=1, deletions=0) for i in range(20)]  # 20 PRs, 1 line each
+    evidence += [Evidence(kind="file", ref=f"src/m{i}.py") for i in range(15)]  # Python
+    evidence += [Evidence(kind="file", ref=f"web/c{i}.js") for i in range(15)]  # JavaScript → 30 files, 2 langs
+    evidence += [Evidence(kind="file", ref="cmd/s.go"), Evidence(kind="file", ref="q.sql")]  # 4 langs total
+    portfolio = Portfolio(subject="ivan", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["volume"].points == 2
+    assert result.dimensions["breadth"].points == 2
+    assert result.dimensions["stack_diversity"].points == 2
+    assert result.dimensions["scale"].points == 0  # median 1 changed line → Small
+    assert result.grade == "A"  # 6 pts, NOT S — the old rubric would have said S
 
 
 # ---------------------------------------------------------------------------

@@ -104,14 +104,38 @@ _DIVERSITY_BANDS: list[tuple[str, int, int]] = [
     ("Focused", 0, 0),  # 0–1 → 0 pts
 ]
 
-# Points total → grade (highest threshold first).
+# Change scale: median code lines changed per PR (additions + deletions, code
+# files only — config/data/markup/docs and generated/vendored files are excluded
+# upstream by the extractor). Reflects typical change size, not raw volume.
+_SCALE_BANDS: list[tuple[str, int, int]] = [
+    ("Large", 150, 2),  # median 150+ changed lines/PR → 2 pts
+    ("Medium", 30, 1),  # 30–149 → 1 pt
+    ("Small", 0, 0),  # 0–29 → 0 pts
+]
+
+# Points total → grade (highest threshold first). Four dimensions × 2 pts → max 8.
+# S now requires maxing ALL four (incl. substantial typical change size), so it is
+# no longer reachable on volume/breadth/diversity alone — the prior saturation.
 _POINTS_TO_GRADE: list[tuple[int, str]] = [
-    (6, "S"),
-    (4, "A"),
-    (2, "B"),
-    (1, "C"),
+    (8, "S"),
+    (6, "A"),
+    (4, "B"),
+    (2, "C"),
     (0, "D"),
 ]
+
+
+def _median(values: list[int]) -> int:
+    """Median of a list of ints, rounded down to an int (0 for an empty list).
+    Pure; used for the change-scale metric."""
+    if not values:
+        return 0
+    ordered = sorted(values)
+    n = len(ordered)
+    mid = n // 2
+    if n % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) // 2
 
 
 def _band_for(value: int, bands: list[tuple[str, int, int]]) -> tuple[str, int]:
@@ -145,7 +169,7 @@ class DimensionResult:
 
 @dataclass
 class ProfileResult:
-    dimensions: dict[str, DimensionResult]  # "volume", "breadth", "stack_diversity"
+    dimensions: dict[str, DimensionResult]  # "volume", "breadth", "stack_diversity", "scale"
     grade: str  # S / A / B / C / D
     score_min: int
     score_max: int
@@ -154,8 +178,8 @@ class ProfileResult:
 def profile(portfolio: Portfolio) -> ProfileResult:
     """Pure deterministic profiler over a grounded Portfolio.
 
-    Returns metrics (volume, breadth, stack_diversity), per-dimension bands,
-    overall grade ∈ {S,A,B,C,D}, and a (min,max) score band.
+    Returns metrics (volume, breadth, stack_diversity, scale), per-dimension
+    bands, overall grade ∈ {S,A,B,C,D}, and a (min,max) score band.
 
     Makes NO subprocess, open, or network call — stdlib only.
     Unknown file extensions map to the literal string "other" (never guessed by a model).
@@ -188,8 +212,13 @@ def profile(portfolio: Portfolio) -> ProfileResult:
     diversity_count = len(langs)
     div_band, div_pts = _band_for(diversity_count, _DIVERSITY_BANDS)
 
+    # --- Change scale: median (additions + deletions) over the PR evidence ---
+    pr_evidence = [e for e in portfolio.evidence if e.kind == "pr"]
+    scale_value = _median([e.additions + e.deletions for e in pr_evidence])
+    scl_band, scl_pts = _band_for(scale_value, _SCALE_BANDS)
+
     # --- Overall grade from total points ---
-    total_pts = vol_pts + brd_pts + div_pts
+    total_pts = vol_pts + brd_pts + div_pts + scl_pts
     grade = "D"
     for threshold, g in _POINTS_TO_GRADE:
         if total_pts >= threshold:
@@ -219,6 +248,13 @@ def profile(portfolio: Portfolio) -> ProfileResult:
             band=div_band,
             points=div_pts,
             evidence_refs=code_file_refs,  # only refs that contributed a counted (code) language
+        ),
+        "scale": DimensionResult(
+            name="scale",
+            value=scale_value,
+            band=scl_band,
+            points=scl_pts,
+            evidence_refs=pr_refs,  # the PRs whose change sizes the median was taken over
         ),
     }
 

@@ -25,6 +25,11 @@ class Evidence:
     url: str = ""  # optional link
     detail: str = ""  # optional one-line context (shown in the rendered output)
     context: str = ""  # optional longer text fed to the narrative model; NOT rendered
+    # Change size for kind="pr": lines added/deleted, counting CODE files only
+    # (generated/config/doc files excluded by the extractor). 0 for non-PR
+    # evidence and for any source that carries no line data (e.g. web articles).
+    additions: int = 0
+    deletions: int = 0
 
 
 @dataclass

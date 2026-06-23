@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Rating change-scale dimension** — the rating now scores the **median changed
+  lines (additions + deletions) per PR**, counting code files only (generated,
+  vendored, lockfile, and config/doc files excluded so a reformat or regenerated
+  lockfile can't inflate it). `Evidence` gained `additions`/`deletions` fields
+  (populated by the `gh` extractors, serialized in portfolio JSON with backward-
+  compatible defaults). The grade is now four dimensions (max 8 pts) with a
+  re-tuned points→grade table, so **S requires substantial typical change size in
+  addition to volume/breadth/diversity** — it is no longer reachable on PR/file/
+  language counts alone (#50, toward de-saturating the rating, #48).
+
 ### Changed
 - **Rating stack diversity counts programming languages only** — config, data,
   markup, and documentation files (YAML, JSON, Markdown, HTML, CSS) no longer

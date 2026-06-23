@@ -228,6 +228,8 @@ def mask_portfolio(portfolio: Portfolio, private: set[str]) -> Portfolio:
                 url=ev.url,
                 detail=ev.detail,
                 context=ev.context,
+                additions=ev.additions,
+                deletions=ev.deletions,
             )
             for ev in portfolio.evidence
         ]
@@ -259,6 +261,8 @@ def mask_portfolio(portfolio: Portfolio, private: set[str]) -> Portfolio:
                 url=new_url,
                 detail=new_detail,
                 context=new_context,
+                additions=ev.additions,
+                deletions=ev.deletions,
             )
         )
 
