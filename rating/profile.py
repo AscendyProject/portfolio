@@ -256,15 +256,19 @@ def profile(portfolio: Portfolio) -> ProfileResult:
     brd_band, brd_pts = _band_for(breadth_count, _BREADTH_BANDS)
 
     # --- Stack diversity: distinct PROGRAMMING languages via the FIXED table ---
-    # Config/data/markup/documentation languages (_NON_CODE_LANGS) are excluded
-    # so ubiquitous README/CI/manifest files don't inflate the count. code_file_refs
-    # are the refs that actually contributed a counted language.
+    # Two exclusions so the count reflects real coding range, not file spread:
+    #   1. Config/data/markup/documentation languages (_NON_CODE_LANGS).
+    #   2. Unmapped extensions — `.toml`/`.ini`/`Dockerfile`/`.lock`/etc. (and any
+    #      truly-unknown extension) all collapse to the literal "other"; counting
+    #      that single catch-all as a "language" let config/junk files inflate
+    #      diversity for free. We do NOT credit what we cannot name.
+    # code_file_refs are the refs that actually contributed a counted language.
     langs: set[str] = set()
     code_file_refs: list[str] = []
     for ref in file_refs:
         ext = _file_ext(ref)
-        lang = _EXT_TO_LANG.get(ext, "other")
-        if lang in _NON_CODE_LANGS:
+        lang = _EXT_TO_LANG.get(ext)  # None for an unmapped extension (was "other")
+        if lang is None or lang in _NON_CODE_LANGS:
             continue
         langs.add(lang)
         code_file_refs.append(ref)

@@ -174,8 +174,9 @@ band get different scores rather than clustering on one value. The grade also ca
 same-grade developers are visibly ordered. A temperature-0 agent writes only the
 grounding-checked reasoning; it changes neither the grade nor the score. Stack
 diversity counts distinct *programming* languages only — config/data/markup/documentation files
-(YAML, JSON, Markdown, HTML, CSS) are excluded so a repo's ubiquitous README/CI/manifest
-files don't inflate the count. Change scale is the median changed lines (additions +
+(YAML, JSON, Markdown, HTML, CSS) and files with an unmapped extension (`.toml`, `.ini`,
+`Dockerfile`, …, which collapse to a single "other" bucket) are excluded so a repo's
+ubiquitous config/CI/manifest files don't inflate the count. Change scale is the median changed lines (additions +
 deletions) per PR over **code files only** — generated, vendored, lockfile, and
 config/doc files are excluded so a reformat or regenerated lockfile can't inflate it. Every metric cites the exact evidence
 refs it was computed from; un-grounded reasoning is dropped. The report also includes a

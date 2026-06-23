@@ -200,12 +200,15 @@ def test_metric_stack_diversity_uses_pinned_table():
     assert result.dimensions["stack_diversity"].value == 3
 
 
-def test_unknown_extension_maps_to_other_never_guessed():
-    """'an unknown extension maps to the literal string "other" (never guessed by a model).'"""
-    from rating.profile import _EXT_TO_LANG
+def test_unknown_extension_not_counted_in_diversity():
+    """An unmapped extension is "other" and does NOT count toward stack diversity
+    (we do not credit what we cannot name; this is also how config/junk files are
+    kept out). language_for_ref still reports "other" for display."""
+    from rating.profile import _EXT_TO_LANG, language_for_ref
 
     # .xyz is not in the table
     assert ".xyz" not in _EXT_TO_LANG
+    assert language_for_ref("archive.xyz") == "other"  # display semantics unchanged
     # A portfolio with only unknown-extension files
     evidence = [
         Evidence(kind="file", ref="archive.xyz"),
@@ -213,8 +216,26 @@ def test_unknown_extension_maps_to_other_never_guessed():
     ]
     portfolio = Portfolio(subject="carol", evidence=evidence, claims=[])
     result = profile(portfolio)
-    # Both map to "other" → 1 distinct language ("other")
-    assert result.dimensions["stack_diversity"].value == 1
+    # Both are "other" → not counted → 0 distinct code languages
+    assert result.dimensions["stack_diversity"].value == 0
+
+
+def test_config_files_without_mapped_extension_excluded_from_diversity():
+    """Config/build files with NO mapped extension (.toml/.ini/.lock/Dockerfile/
+    Makefile) collapse to "other" and must NOT inflate diversity — a Python repo
+    with only such companions stays at 1 language, not 2+."""
+    evidence = [
+        Evidence(kind="file", ref="app/main.py"),  # Python (counts)
+        Evidence(kind="file", ref="pyproject.toml"),  # other
+        Evidence(kind="file", ref="setup.cfg"),  # other
+        Evidence(kind="file", ref="poetry.lock"),  # other
+        Evidence(kind="file", ref="Dockerfile"),  # other (no extension)
+        Evidence(kind="file", ref="Makefile"),  # other (no extension)
+    ]
+    portfolio = Portfolio(subject="frank", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["stack_diversity"].value == 1  # Python only
+    assert set(result.dimensions["stack_diversity"].evidence_refs) == {"app/main.py"}
 
 
 def test_config_doc_files_excluded_from_stack_diversity():

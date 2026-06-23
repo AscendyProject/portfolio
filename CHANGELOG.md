@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Rating stack diversity no longer counts the "other" bucket** — files with an
+  unmapped extension (`.toml`, `.ini`, `.lock`, `Dockerfile`, `Makefile`, and any
+  truly-unknown extension) collapsed to the single literal `other` language, which
+  let config/build/junk files inflate the diversity dimension for free. They are
+  now excluded from the count (we do not credit what we cannot name); `language_for_ref`
+  still reports `other` for display. Complements the earlier markup/doc exclusion (#48).
+
 ### Added
 - **Rating "How to Improve" section** — the scorecard now explains, per dimension,
   why the score is what it is and what would raise it: each dimension is either
