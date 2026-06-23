@@ -69,6 +69,110 @@ def _change_size(files: list[dict]) -> tuple[int, int]:
     return additions, deletions
 
 
+# ---------------------------------------------------------------------------
+# Evidence denylist — pinned in code; a model NEVER contributes to this set.
+# Same design principle as _EXT_TO_LANG in rating/profile.py.
+#
+# Single constant encoding all four rule classes (see _is_denied_path for semantics):
+#   "dir_segments"       — rule (a): any "/"-separated segment must NOT exactly match
+#   "exact_filenames"    — rule (b): final segment must NOT exactly match
+#   "filename_suffix"    — rule (b): final segment must NOT end with this suffix
+#   "segment_sequences"  — rules (c)+(d): no consecutive-segment sub-sequence may match;
+#                          a length-1 tuple matches any single segment at ANY depth.
+# ---------------------------------------------------------------------------
+_EVIDENCE_DENYLIST: dict[str, object] = {
+    # (a) Build-output / vendored-dependency / IDE-metadata directory names.
+    #     Note: "build.gradle" ≠ "build" — a filename token is NOT a dir segment.
+    "dir_segments": frozenset(
+        {
+            # Build output
+            "target",
+            "build",
+            "dist",
+            "out",
+            "bin",
+            ".next",
+            "__pycache__",
+            # Vendored dependencies
+            "node_modules",
+            "vendor",
+            ".venv",
+            # IDE / tooling metadata directory names
+            ".settings",
+            ".idea",
+            ".vscode",
+        }
+    ),
+    # (b) Generated IDE metadata filenames (final path segment — exact match).
+    "exact_filenames": frozenset({".classpath", ".project", ".springBeans"}),
+    # (b) IntelliJ module file suffix (final path segment — suffix match).
+    "filename_suffix": ".iml",
+    # (c) META-INF/maven — generated Maven manifest metadata at any nesting depth.
+    # (d) m2e-wtp — Eclipse m2e web-tools-platform generated resources (single segment).
+    #     Length-1 tuples are checked as "any single segment equals this value at ANY depth."
+    "segment_sequences": (
+        ("META-INF", "maven"),
+        ("m2e-wtp",),
+    ),
+}
+
+
+def _is_denied_path(path: str) -> bool:
+    """Return True iff the given BARE file path should be excluded from Evidence(kind="file").
+
+    Accepts a bare repository path (e.g. "src/App.jsx"). It does NOT parse or
+    strip any "<owner>/<repo>:" prefix — each extraction site passes the path
+    component it already has. A single-repo bare git path may legally contain a
+    colon (e.g. "src/generated:target/file.py"), so the path is NOT colon-split.
+
+    Committed deterministic rule (single rule, non-ambiguous):
+      Split the path on "/". Deny iff ANY of these hold:
+      (a) any segment exactly equals a denied directory segment name, at ANY depth;
+      (b) the final segment exactly matches a denied metadata filename or ends with ".iml";
+      (c) the segment sequence contains "META-INF" immediately followed by "maven", at
+          any depth;
+      (d) any segment equals "m2e-wtp", at any depth.
+
+    Does NOT over-match on filenames: "src/components/target.ts" → KEPT ("target.ts" ≠
+    "target"); root-level "build.gradle" → KEPT ("build.gradle" ≠ "build").
+    "src/build/page.tsx" → DROPPED: the "build" dir segment matches at depth 1.
+
+    All policy is read exclusively from _EVIDENCE_DENYLIST — that constant is the
+    single source of truth; no rule is hard-coded in this function body.
+    """
+    segments = path.split("/")
+    if not segments:
+        return False
+
+    final = segments[-1]
+
+    _exact = _EVIDENCE_DENYLIST["exact_filenames"]
+    _suffix = _EVIDENCE_DENYLIST["filename_suffix"]
+    _dirs = _EVIDENCE_DENYLIST["dir_segments"]
+    _seqs = _EVIDENCE_DENYLIST["segment_sequences"]
+
+    # (b) exact metadata filename on the final segment
+    if final in _exact:
+        return True
+
+    # (b) *.iml suffix on the final segment
+    if final.endswith(_suffix):
+        return True
+
+    # (a) any segment exactly equals a denied directory segment name
+    if any(seg in _dirs for seg in segments):
+        return True
+
+    # (c)+(d) consecutive-segment sequence rules (length-1 = any single segment)
+    for seq in _seqs:
+        n = len(seq)
+        for i in range(len(segments) - n + 1):
+            if tuple(segments[i : i + n]) == seq:
+                return True
+
+    return False
+
+
 def _run_gh(args: list[str]) -> str:
     proc = subprocess.run(
         ["gh", *args],
@@ -108,7 +212,7 @@ def parse_pr_evidence(pr_json: str) -> list[Evidence]:
         )
         for f in files:
             path = f.get("path")
-            if path and path not in seen_files:
+            if path and path not in seen_files and not _is_denied_path(path):
                 seen_files.add(path)
                 evidence.append(Evidence(kind="file", ref=path, detail=f"changed in PR#{num}"))
     return evidence
@@ -172,7 +276,7 @@ def parse_authored_pr_evidence(
         )
         for f in files:
             path = f.get("path")
-            if path:
+            if path and not _is_denied_path(path):
                 file_ref = f"{name_with_owner}:{path}"
                 evidence.append(Evidence(kind="file", ref=file_ref, detail=f"changed in {pr_ref}"))
     return evidence

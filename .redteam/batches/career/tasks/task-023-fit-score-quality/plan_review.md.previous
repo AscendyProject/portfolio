@@ -1,0 +1,15 @@
+## Adversarial plan review
+
+Reviewed `input.md`, `outcome.md`, `state.json`, relevant source/tests, and the plan-review rubric.
+
+PR-001 severity:blocker status:open
+
+Part A does not plan to remove complete harness preamble/meta lines. It only adds token-level stopwords, leaving preamble terms such as `extracted` and `matching` in the denominator. Add explicit deterministic preamble-line removal and a regression test using the actual preamble format.
+
+PR-002 severity:major status:open
+
+The requirement that `resume.select` “imports only stdlib modules” contradicts its necessary existing import from `portfolio.model`. Reword this as “no new third-party dependencies/imports” and test specifically for forbidden external stemming packages.
+
+Verification note: The fenced YAML verification block is parseable, contains a command, and `bash .redteam/scripts/verify.sh` is a pure lint/format/test operation.
+
+REVIEW_DECISION: CHANGES_REQUESTED
