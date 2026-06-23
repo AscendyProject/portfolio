@@ -1243,6 +1243,25 @@ def test_www_github_url_is_discovered_and_masked():
     assert "acme/secret" not in masked.evidence[0].url
 
 
+def test_assert_maskable_allows_web_article_evidence():
+    """`--source-type web` article evidence has an arbitrary public content URL,
+    not a repo to mask — a non-github.com article host must NOT trip the guard
+    (regression: the GHES fail-closed check broke web + --mask-private)."""
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(
+                kind="article",
+                ref="https://blog.example.com/post",
+                url="https://blog.example.com/post",
+                detail="My Post",
+            )
+        ],
+        claims=[],
+    )
+    assert_maskable(p)  # must not raise — nothing to mask in a public article
+
+
 def test_assert_maskable_allows_github_com_and_bare_refs():
     """github.com URLs, empty URLs, and bare refs do not trip the guard."""
     p = Portfolio(

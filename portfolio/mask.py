@@ -159,8 +159,15 @@ def assert_maskable(portfolio: Portfolio) -> None:
     private GHES repo unmasked. Refuse instead — under-masking private evidence
     is worse than refusing the run. Raises MaskingError for the first non-
     maskable host found.
+
+    Only repo-artifact evidence (PRs, files, commits, …) is checked. `article`
+    evidence comes from `--source-type web`: its URL is arbitrary public content,
+    not a repo, and carries no GitHub repo name to mask — so a non-github.com
+    article host is NOT a masking failure and must not trip the guard.
     """
     for ev in portfolio.evidence:
+        if ev.kind == "article":
+            continue  # web article URL is public content, not a maskable repo
         if not ev.url:
             continue
         try:
