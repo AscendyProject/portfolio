@@ -474,7 +474,7 @@ def test_bad_source_url_exits_nonzero(tmp_path, capsys):
             "--source-type",
             "github",
             "--source",
-            "https://gitlab.com/owner/repo",
+            "https://github.com/owner",
             "--author",
             "alice",
             "--jd",

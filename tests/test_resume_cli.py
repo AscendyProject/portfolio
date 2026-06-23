@@ -236,9 +236,9 @@ def test_missing_jd_exits_nonzero(tmp_path, capsys):
 
 
 def test_non_github_source_rejected_without_extracting(tmp_path, capsys):
-    """'An unparseable / unsupported --source URL (e.g. https://gitlab.com/owner/repo
-    for --source-type github) causes a non-zero exit with a stderr error and never
-    invokes the injected extractor.'"""
+    """'An unparseable / malformed --source URL (e.g. https://github.com/owner —
+    missing repo — for --source-type github) causes a non-zero exit with a stderr
+    error and never invokes the injected extractor.'"""
     jd_path = _make_jd(tmp_path, "python backend")
     calls: list[dict] = []
 
@@ -247,7 +247,7 @@ def test_non_github_source_rejected_without_extracting(tmp_path, capsys):
         return []
 
     code = run(
-        ["--source-type", "github", "--source", "https://gitlab.com/owner/repo", "--author", "alice", "--jd", jd_path],
+        ["--source-type", "github", "--source", "https://github.com/owner", "--author", "alice", "--jd", jd_path],
         extractor=recording_extractor,
         runner=_fake_runner,
     )
