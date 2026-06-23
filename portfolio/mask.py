@@ -67,6 +67,11 @@ _PATH_LIKE_EXTENSIONS = (
 )
 
 _GITHUB_HOST = "github.com"
+# Hosts whose repos the masking path can discover, look up, and relabel. Discovery
+# (extract_repo_names) and the fail-closed guard (assert_maskable) BOTH key off
+# this single set, so a host is never accepted by one and dropped by the other
+# (which would silently under-mask — codex IR-002).
+_MASKABLE_HOSTS = frozenset({_GITHUB_HOST, "www.github.com"})
 
 
 def _is_valid_owner_repo(candidate: str) -> bool:
@@ -122,11 +127,11 @@ def extract_repo_names(portfolio: Portfolio) -> set[str]:
         if result is not None:
             found.add(result)
 
-        # evidence.url: only github.com URLs
+        # evidence.url: only hosts the masking path can actually handle
         if ev.url:
             try:
                 parsed = urlparse(ev.url)
-                if parsed.hostname == _GITHUB_HOST:
+                if parsed.hostname in _MASKABLE_HOSTS:
                     segments = [s for s in parsed.path.split("/") if s]
                     if len(segments) >= 2:
                         candidate = f"{segments[0]}/{segments[1]}"
@@ -142,10 +147,6 @@ def extract_repo_names(portfolio: Portfolio) -> set[str]:
                 found.add(result)
 
     return found
-
-
-# Hosts whose repos the masking path can discover, look up, and relabel.
-_MASKABLE_HOSTS = frozenset({_GITHUB_HOST, "www.github.com"})
 
 
 def assert_maskable(portfolio: Portfolio) -> None:

@@ -1229,6 +1229,20 @@ def test_assert_maskable_raises_for_ghes_host():
         assert_maskable(p)
 
 
+def test_www_github_url_is_discovered_and_masked():
+    """www.github.com is in the maskable set, so discovery must also handle it —
+    a bare-ref portfolio with a www.github.com URL is discovered and masked, not
+    silently leaked (codex IR-002: guard and discovery must agree on hosts)."""
+    p = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="PR#1", url="https://www.github.com/acme/secret/pull/1")],
+        claims=[],
+    )
+    assert extract_repo_names(p) == {"acme/secret"}  # discovered despite the www. prefix
+    masked = mask_portfolio(p, private={"acme/secret"})
+    assert "acme/secret" not in masked.evidence[0].url
+
+
 def test_assert_maskable_allows_github_com_and_bare_refs():
     """github.com URLs, empty URLs, and bare refs do not trip the guard."""
     p = Portfolio(
