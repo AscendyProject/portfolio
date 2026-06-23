@@ -151,6 +151,26 @@ _SCORE_CEILINGS: dict[str, int] = {
 }
 
 
+# Sub-tier suffixes within a grade, ordered bottom → top. The deterministic
+# score's position inside its band selects one: bottom third → "-", middle → ""
+# (flat), top third → "+". Refines the letter grade WITHOUT changing it — a "B+"
+# sits above a "B-", but both are grade B. The grade letter is the authoritative
+# tier; the suffix just shows where in the band the developer falls.
+_SUB_TIER_SYMBOLS: tuple[str, str, str] = ("-", "", "+")
+
+
+def _sub_tier(score: int, score_min: int, score_max: int) -> str:
+    """Sub-tier suffix ("+", "" or "-") from the score's position within its band:
+    top third → "+", middle → "" (flat), bottom → "-". A zero-width band (not
+    produced by the real rubric) maps to flat."""
+    span = score_max - score_min
+    if span <= 0:
+        return ""
+    fraction = (score - score_min) / span
+    index = min(2, max(0, int(fraction * 3)))
+    return _SUB_TIER_SYMBOLS[index]
+
+
 def _continuous_score(dimensions: dict[str, DimensionResult], score_min: int, score_max: int) -> int:
     """A deterministic score inside [score_min, score_max].
 
@@ -207,14 +227,18 @@ class ProfileResult:
     # Deterministic continuous score inside [score_min, score_max], computed from
     # the dimension metrics (default 0 so hand-built instances in tests stay valid).
     score: int = 0
+    # Sub-tier suffix within the grade ("+", "" flat, or "-") from the score's
+    # band position; "" for hand-built instances that don't compute it (renders
+    # as the bare letter, indistinguishable from a flat mid-band tier).
+    sub_tier: str = ""
 
 
 def profile(portfolio: Portfolio) -> ProfileResult:
     """Pure deterministic profiler over a grounded Portfolio.
 
     Returns metrics (volume, breadth, stack_diversity, scale), per-dimension
-    bands, overall grade ∈ {S,A,B,C,D}, a (min,max) score band, and a
-    deterministic continuous score inside that band.
+    bands, overall grade ∈ {S,A,B,C,D}, a (min,max) score band, a deterministic
+    continuous score inside that band, and a sub-tier suffix (+/flat/-).
 
     Makes NO subprocess, open, or network call — stdlib only.
     Unknown file extensions map to the literal string "other" (never guessed by a model).
@@ -294,6 +318,7 @@ def profile(portfolio: Portfolio) -> ProfileResult:
     }
 
     score = _continuous_score(dimensions, score_min, score_max)
+    sub_tier = _sub_tier(score, score_min, score_max)
 
     return ProfileResult(
         dimensions=dimensions,
@@ -301,4 +326,5 @@ def profile(portfolio: Portfolio) -> ProfileResult:
         score_min=score_min,
         score_max=score_max,
         score=score,
+        sub_tier=sub_tier,
     )

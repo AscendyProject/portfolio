@@ -32,8 +32,10 @@ def render_rating(
 
     lines.append(f"# {strings['title_rating']} — {_escape(portfolio.subject)}")
     lines.append("")
+    # Append the sub-tier suffix (+/flat/-) to the grade, e.g. "B+", "B", "B-".
+    grade_display = f"{grade_result.grade}{profile_result.sub_tier}"
     lines.append(
-        f"**{strings['grade_label']}: {grade_result.grade}** | **{strings['score_label_rating']}: {grade_result.score}** "
+        f"**{strings['grade_label']}: {grade_display}** | **{strings['score_label_rating']}: {grade_result.score}** "
         f"({strings['band_label']} {profile_result.score_min}–{profile_result.score_max})"
     )
     lines.append("")

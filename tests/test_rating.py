@@ -467,6 +467,49 @@ def test_scores_differ_within_the_same_band():
 
 
 # ---------------------------------------------------------------------------
+# Done-when: sub-tier suffix within a grade (+/flat/-, e.g. B+ / B / B-)
+# ---------------------------------------------------------------------------
+
+
+def test_sub_tier_buckets_by_band_position():
+    """The suffix is selected by the score's position in its band: bottom third
+    → '-', middle → '' (flat), top → '+'. A zero-width band maps to flat."""
+    from rating.profile import _sub_tier
+
+    assert _sub_tier(70, 70, 84) == "-"  # bottom of band
+    assert _sub_tier(77, 70, 84) == ""  # middle (flat)
+    assert _sub_tier(84, 70, 84) == "+"  # top
+    assert _sub_tier(100, 100, 100) == ""  # zero-width band → flat, no crash
+
+
+def test_profile_assigns_sub_tier():
+    """profile() populates a sub_tier suffix for a real portfolio."""
+    result = profile(_make_portfolio())
+    assert result.sub_tier in {"+", "", "-"}
+
+
+def test_sub_tier_orders_within_same_grade():
+    """A stronger same-grade portfolio gets a higher (or equal) suffix than a
+    weaker one — the suffix refines, consistent with the score ordering."""
+    weak = profile(_make_portfolio())  # grade B, lower score
+    evidence = [Evidence(kind="pr", ref=f"PR#{i}", additions=1, deletions=0) for i in range(50)]
+    evidence += [Evidence(kind="file", ref=f"src/m{i}.py") for i in range(60)]
+    strong = profile(Portfolio(subject="bob", evidence=evidence, claims=[]))  # grade B, higher score
+    assert weak.grade == strong.grade == "B"
+    order = {"-": 0, "": 1, "+": 2}
+    assert order[strong.sub_tier] >= order[weak.sub_tier]
+
+
+def test_render_shows_grade_with_sub_tier():
+    """The rendered scorecard shows the suffix on the grade, e.g. 'Grade: B+' / 'B' / 'B-'."""
+    portfolio = _make_portfolio()
+    profile_result = profile(portfolio)
+    grade_result = grade(portfolio, profile_result, _make_simple_grader())
+    markdown = render_rating(portfolio, profile_result, grade_result)
+    assert f"Grade: {profile_result.grade}{profile_result.sub_tier}" in markdown
+
+
+# ---------------------------------------------------------------------------
 # Done-when: model cannot change the grade
 # ---------------------------------------------------------------------------
 

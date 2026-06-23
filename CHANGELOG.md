@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Rating sub-tier suffix** — each letter grade now carries a `+`/flat/`-` suffix
+  (e.g. `B+`, `B`, `B-`) from the deterministic score's position within its band
+  (top third → `+`, middle → flat, bottom → `-`). Refines the grade without
+  changing it, so two same-grade developers are visibly ordered (#48).
+
 ### Changed
 - **Rating score is now deterministic and continuous** — the precise 0–100 score
   within the locked grade band is computed as a continuous function of the
