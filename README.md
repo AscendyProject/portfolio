@@ -82,6 +82,12 @@ Run `python -m portfolio --source-type github --source <url> --author <handle>` 
 `--source-type web`) to render a grounded portfolio as Markdown. The `/portfolio`
 slash command is the interactive front door.
 
+`--source-type github` also accepts a **GitHub Enterprise Server** URL (e.g.
+`https://ghe.example.com/<owner>/<repo>`): the host is passed through to `gh`, so
+you must be logged into that host (`gh auth login --hostname ghe.example.com`).
+Pointing `--source-type web` at a code-host repo URL is **not** a substitute — it
+scrapes the page as an article and grounds nothing.
+
 The rendered document leads with a grounded headline blockquote (model-authored, or a
 deterministic fallback when grounding fails), followed by a stats line showing merged-PR
 count, distinct repo count, and the detected language stack. When the model returns

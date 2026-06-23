@@ -165,16 +165,16 @@ def test_web_run_renders_with_injected_fetcher(capsys):
 
 
 # ---------------------------------------------------------------------------
-# Done-when: an unparseable / non-GitHub source is rejected without extracting
+# Done-when: an unparseable / malformed source is rejected without extracting
 # ---------------------------------------------------------------------------
 
 
 def test_non_github_source_rejected_without_extracting(capsys):
-    """ "a non-GitHub / unparseable `--source` URL exits non-zero with a clear error
+    """ "a malformed / unparseable `--source` URL exits non-zero with a clear error
     and never invokes the extractor"."""
     extractor, calls = _recording_extractor()
     code = run(
-        ["--source-type", "github", "--source", "https://gitlab.com/owner/repo", "--author", "alice"],
+        ["--source-type", "github", "--source", "https://github.com/owner", "--author", "alice"],  # missing repo
         extractor=extractor,
         runner=_fake_runner,
     )

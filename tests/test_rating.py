@@ -600,7 +600,7 @@ def test_invalid_source_url_exits_nonzero(capsys):
             "--source-type",
             "github",
             "--source",
-            "https://gitlab.com/owner/repo",
+            "https://github.com/owner",
             "--author",
             "alice",
         ],

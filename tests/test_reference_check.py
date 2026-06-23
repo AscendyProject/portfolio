@@ -232,7 +232,7 @@ def test_grounding_summary_stderr_only(capsys):
 
 
 def test_non_github_source_rejected(capsys):
-    """'Non-GitHub --source under --source-type github → non-zero exit, no letter body'."""
+    """'Malformed --source under --source-type github → non-zero exit, no letter body'."""
     runner = _make_counter_runner(_NARRATE_ONE, _LETTER_ONE)
     extractor_calls = [0]
 
@@ -241,7 +241,7 @@ def test_non_github_source_rejected(capsys):
         return _fake_extractor(repo=repo, author=author)
 
     code = run(
-        ["--source-type", "github", "--source", "https://gitlab.com/owner/repo", "--author", "alice"],
+        ["--source-type", "github", "--source", "https://github.com/owner", "--author", "alice"],  # missing repo
         extractor=recording_extractor,
         runner=runner,
     )

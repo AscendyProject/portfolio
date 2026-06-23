@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **GitHub Enterprise Server support** — `--source-type github` now accepts a
+  GHES repo URL (e.g. `https://ghe.example.com/<owner>/<repo>`); the host is
+  passed through to `gh` as `[HOST/]OWNER/REPO` so the call routes to that server
+  (requires `gh auth login --hostname <host>`). github.com URLs are unchanged
+  (#45).
+
 ## [0.3.0] — 2026-06-21
 
 Readability and reach: output is cleaner by default, resume gets a standard

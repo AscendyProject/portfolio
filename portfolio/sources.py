@@ -22,11 +22,24 @@ from portfolio.extract import extract_authored_prs, extract_merged_prs
 from portfolio.model import Evidence, Portfolio
 from portfolio.web import extract_article_evidence, fetch_html, parse_web_source
 
+# github.com is special-cased only in the *return format* (bare `owner/repo`);
+# any other syntactically valid host is treated as a GitHub Enterprise Server
+# and returned host-qualified. We cannot tell a GHES host from a non-GitHub host
+# (e.g. gitlab.com) by name alone, so host *validity* is left to `gh`, which
+# fails with a clear auth error for a host it is not logged into.
 _GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
 # owner/repo segments must be clean GitHub names. This rejects %-encoding (e.g.
 # %2F), whitespace, and any other character that would otherwise reach
 # `gh --repo` as garbage instead of being refused up front.
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+# A syntactically valid DNS hostname: dot-separated labels of [A-Za-z0-9-], each
+# 1–63 chars with no leading/trailing hyphen. Guards against junk (spaces,
+# slashes, empty labels) reaching `gh` as a host. Requires at least one dot so a
+# bare label (e.g. `localhost`) is not mistaken for a repo host.
+_HOST_RE = re.compile(
+    r"^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$"
+)
 # GitHub handle: alphanumeric + hyphens only. Leading/trailing hyphens are not
 # valid GitHub usernames; we also reject the bare "-" single-char handle.
 _AUTHOR_RE = re.compile(r"^[A-Za-z0-9-]+$")
@@ -62,19 +75,26 @@ class ResolvedSource:
 
 
 def parse_github_source(url: str) -> str:
-    """Parse a GitHub repo URL into the `owner/repo` string the extractor needs.
+    """Parse a GitHub repo URL into the repo spec the extractor (`gh`) needs.
 
-    Accepts `http(s)://github.com/<owner>/<repo>` with an optional trailing slash
-    or `.git` suffix. Anything that is not a clean GitHub `owner/repo` (wrong
-    host, missing repo, extra/empty path segments, query/fragment, ssh form, no
-    scheme, or names with characters outside `[A-Za-z0-9._-]`) raises
-    ValueError — reject rather than guess, so no garbage reaches `gh`.
+    Accepts `http(s)://<host>/<owner>/<repo>` with an optional trailing slash or
+    `.git` suffix, for github.com **or a GitHub Enterprise Server host**. For
+    github.com the result is the bare `owner/repo` (unchanged); for any other
+    host it is `host/owner/repo` — the `[HOST/]OWNER/REPO` form `gh --repo`
+    accepts, so the call routes to that server.
+
+    Anything that is not a clean repo URL (junk/missing host, missing repo,
+    extra/empty path segments, query/fragment, ssh form, no scheme, or names with
+    characters outside `[A-Za-z0-9._-]`) raises ValueError — reject rather than
+    guess, so no garbage reaches `gh`. Whether a syntactically valid host is a
+    real GitHub instance is left to `gh` (it errors clearly for an unknown host).
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError(f"expected an http(s) URL, got {url!r}")
-    if parsed.netloc.lower() not in _GITHUB_HOSTS:
-        raise ValueError(f"not a github.com URL: {url!r}")
+    host = parsed.hostname  # lowercased, port/userinfo stripped
+    if not host or not _HOST_RE.match(host):
+        raise ValueError(f"invalid or missing host in {url!r}")
     if parsed.query or parsed.fragment:
         raise ValueError(f"unexpected query/fragment in {url!r}")
     # Expect the path to be exactly /<owner>/<repo> (one optional trailing slash).
@@ -82,7 +102,7 @@ def parse_github_source(url: str) -> str:
     path = parsed.path[:-1] if parsed.path.endswith("/") else parsed.path
     segments = path.split("/")
     if len(segments) != 3 or segments[0] != "":
-        raise ValueError(f"expected exactly github.com/<owner>/<repo>, got {url!r}")
+        raise ValueError(f"expected exactly <host>/<owner>/<repo>, got {url!r}")
     owner, repo = segments[1], segments[2]
     if repo.endswith(".git"):
         repo = repo[:-4]
@@ -90,7 +110,10 @@ def parse_github_source(url: str) -> str:
         raise ValueError(f"invalid owner/repo name in {url!r}")
     if owner in (".", "..") or repo in (".", ".."):  # dot segments are never real names
         raise ValueError(f"invalid owner/repo name in {url!r}")
-    return f"{owner}/{repo}"
+    # github.com -> bare owner/repo (unchanged); GHES -> host-qualified for `gh --repo`.
+    if host in _GITHUB_HOSTS:
+        return f"{owner}/{repo}"
+    return f"{host}/{owner}/{repo}"
 
 
 def _github_handler(request: SourceRequest) -> ResolvedSource:
