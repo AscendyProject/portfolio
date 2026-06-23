@@ -58,6 +58,64 @@ def test_pr_detail_carries_size():
 
 
 # ---------------------------------------------------------------------------
+# Change-size fields: count CODE files only (exclude config/generated/lockfiles)
+# ---------------------------------------------------------------------------
+
+_SAMPLE_WITH_FILE_SIZES = json.dumps(
+    [
+        {
+            "number": 200,
+            "title": "Feature + noise",
+            "url": "https://github.com/o/r/pull/200",
+            "additions": 5000,  # PR-level total (display only)
+            "deletions": 100,
+            "files": [
+                {"path": "app/service.py", "additions": 120, "deletions": 30},  # code → counts
+                {"path": "config/values.yaml", "additions": 40, "deletions": 5},  # config → excluded
+                {"path": "package-lock.json", "additions": 4000, "deletions": 50},  # lockfile → excluded
+                {"path": "vendor/lib/x.go", "additions": 800, "deletions": 10},  # vendored → excluded
+                {"path": "README.md", "additions": 40, "deletions": 5},  # doc → excluded
+            ],
+        }
+    ]
+)
+
+
+def test_pr_change_size_counts_code_files_only():
+    """Evidence.additions/deletions sum only code-file lines; config, lockfiles,
+    vendored, and doc files are excluded even though the PR-level total is huge."""
+    ev = parse_pr_evidence(_SAMPLE_WITH_FILE_SIZES)
+    pr = next(e for e in ev if e.ref == "PR#200")
+    assert pr.additions == 120  # only app/service.py
+    assert pr.deletions == 30
+    # the human detail still shows gh's raw PR-level totals
+    assert "+5000/-100" in pr.detail
+
+
+def test_pr_change_size_zero_when_files_lack_line_data():
+    """When `files` carry no per-file additions/deletions (older gh shape), the
+    stored change size is 0 — graceful degradation, no crash."""
+    ev = parse_pr_evidence(_SAMPLE)  # files have only `path`
+    pr128 = next(e for e in ev if e.ref == "PR#128")
+    assert pr128.additions == 0
+    assert pr128.deletions == 0
+
+
+def test_authored_pr_change_size_counts_code_files_only():
+    """github-author path also records code-only change size on PR evidence."""
+    files_by_pr = {
+        "https://github.com/owner1/repoA/pull/1": [
+            {"path": "src/main.py", "additions": 90, "deletions": 10},
+            {"path": "go.sum", "additions": 500, "deletions": 0},  # lockfile → excluded
+        ],
+    }
+    ev = parse_authored_pr_evidence(_SEARCH_TWO_REPOS, files_by_pr)
+    pr = next(e for e in ev if e.ref == "owner1/repoA#1")
+    assert pr.additions == 90
+    assert pr.deletions == 10
+
+
+# ---------------------------------------------------------------------------
 # parse_authored_pr_evidence — pure unit tests (no live `gh`)
 # ---------------------------------------------------------------------------
 

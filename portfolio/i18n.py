@@ -79,6 +79,7 @@ LANGS: dict[str, dict] = {
             "volume": "Volume",
             "breadth": "Breadth",
             "stack_diversity": "Stack Diversity",
+            "scale": "Change Scale",
         },
         # band enum labels (keyed by rating.profile band value); en values are identity.
         "band_labels": {
@@ -91,12 +92,17 @@ LANGS: dict[str, dict] = {
             "Polyglot": "Polyglot",
             "Versatile": "Versatile",
             "Focused": "Focused",
+            "Large": "Large",
+            "Medium": "Medium",
+            "Small": "Small",
         },
         "dim_value_label": "Value",
         "dim_band_label": "Band",
         "dim_points_label": "Points",
         "evidence_refs_label": "Evidence refs",
         "section_assessment": "Assessment",
+        "section_improve": "How to Improve",
+        "improve_maxed": "maxed",
         "section_rubric": "Rubric",
         "rating_rubric": (
             "| Grade | Score band |\n"
@@ -173,6 +179,7 @@ LANGS: dict[str, dict] = {
             "volume": "활동량",
             "breadth": "범위",
             "stack_diversity": "기술 다양성",
+            "scale": "변경 규모",
         },
         # 밴드 레이블 (rating.profile 밴드 값 기준)
         "band_labels": {
@@ -185,12 +192,17 @@ LANGS: dict[str, dict] = {
             "Polyglot": "다언어",
             "Versatile": "다재다능",
             "Focused": "집중",
+            "Large": "큼",
+            "Medium": "중간",
+            "Small": "작음",
         },
         "dim_value_label": "값",
         "dim_band_label": "범위",
         "dim_points_label": "점수",
         "evidence_refs_label": "근거 참조",
         "section_assessment": "종합 평가",
+        "section_improve": "점수 올리기",
+        "improve_maxed": "최고 단계",
         "section_rubric": "평가 기준",
         "rating_rubric": (
             "| 등급 | 점수 범위  |\n"

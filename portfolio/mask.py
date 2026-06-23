@@ -15,6 +15,13 @@ from urllib.parse import urlparse
 
 from .model import Claim, Evidence, Portfolio
 
+
+class MaskingError(Exception):
+    """Raised when --mask-private cannot guarantee masking for the given evidence
+    (e.g. a GitHub Enterprise Server host that the discovery/visibility/relabel
+    path does not yet support). Fail closed rather than emit unmasked output."""
+
+
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 # Matches owner/repo#<digits> — strictly digits after #
 _PR_REF_RE = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$")
@@ -60,6 +67,11 @@ _PATH_LIKE_EXTENSIONS = (
 )
 
 _GITHUB_HOST = "github.com"
+# Hosts whose repos the masking path can discover, look up, and relabel. Discovery
+# (extract_repo_names) and the fail-closed guard (assert_maskable) BOTH key off
+# this single set, so a host is never accepted by one and dropped by the other
+# (which would silently under-mask — codex IR-002).
+_MASKABLE_HOSTS = frozenset({_GITHUB_HOST, "www.github.com"})
 
 
 def _is_valid_owner_repo(candidate: str) -> bool:
@@ -115,11 +127,11 @@ def extract_repo_names(portfolio: Portfolio) -> set[str]:
         if result is not None:
             found.add(result)
 
-        # evidence.url: only github.com URLs
+        # evidence.url: only hosts the masking path can actually handle
         if ev.url:
             try:
                 parsed = urlparse(ev.url)
-                if parsed.hostname == _GITHUB_HOST:
+                if parsed.hostname in _MASKABLE_HOSTS:
                     segments = [s for s in parsed.path.split("/") if s]
                     if len(segments) >= 2:
                         candidate = f"{segments[0]}/{segments[1]}"
@@ -135,6 +147,40 @@ def extract_repo_names(portfolio: Portfolio) -> set[str]:
                 found.add(result)
 
     return found
+
+
+def assert_maskable(portfolio: Portfolio) -> None:
+    """Fail closed when --mask-private cannot reliably mask this portfolio.
+
+    Repo discovery, the `gh repo view` visibility lookup, and relabeling all
+    assume github.com. A GitHub Enterprise Server URL (e.g.
+    `https://ghe.example.com/owner/repo/pull/1`) is therefore neither discovered
+    nor masked, so silently reporting "masked 0 private repo(s)" could emit a
+    private GHES repo unmasked. Refuse instead — under-masking private evidence
+    is worse than refusing the run. Raises MaskingError for the first non-
+    maskable host found.
+
+    Only repo-artifact evidence (PRs, files, commits, …) is checked. `article`
+    evidence comes from `--source-type web`: its URL is arbitrary public content,
+    not a repo, and carries no GitHub repo name to mask — so a non-github.com
+    article host is NOT a masking failure and must not trip the guard.
+    """
+    for ev in portfolio.evidence:
+        if ev.kind == "article":
+            continue  # web article URL is public content, not a maskable repo
+        if not ev.url:
+            continue
+        try:
+            host = urlparse(ev.url).hostname
+        except ValueError:
+            continue  # an unparseable URL yields no repo to mask anyway
+        if host and host not in _MASKABLE_HOSTS:
+            raise MaskingError(
+                f"--mask-private does not support host {host!r} (only github.com): "
+                f"private repos on GitHub Enterprise Server cannot be reliably masked, "
+                f"so the run is refused rather than risk emitting them unmasked. "
+                f"Re-run without --mask-private."
+            )
 
 
 def _gh_visibility_lookup(repo: str) -> bool:
@@ -228,6 +274,8 @@ def mask_portfolio(portfolio: Portfolio, private: set[str]) -> Portfolio:
                 url=ev.url,
                 detail=ev.detail,
                 context=ev.context,
+                additions=ev.additions,
+                deletions=ev.deletions,
             )
             for ev in portfolio.evidence
         ]
@@ -259,6 +307,8 @@ def mask_portfolio(portfolio: Portfolio, private: set[str]) -> Portfolio:
                 url=new_url,
                 detail=new_detail,
                 context=new_context,
+                additions=ev.additions,
+                deletions=ev.deletions,
             )
         )
 

@@ -7,6 +7,46 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Rating "How to Improve" section** — the scorecard now explains, per dimension,
+  why the score is what it is and what would raise it: each dimension is either
+  marked maxed or shows the next band and the exact raw delta needed (e.g.
+  `Volume: Steady → High (≥20, +12)`). Deterministic rubric arithmetic over the
+  developer's own metrics — no model, no population comparison (localized en/ko)
+  (#55).
+- **Rating sub-tier suffix** — each letter grade now carries a `+`/flat/`-` suffix
+  (e.g. `B+`, `B`, `B-`) from the deterministic score's position within its band
+  (top third → `+`, middle → flat, bottom → `-`). Refines the grade without
+  changing it, so two same-grade developers are visibly ordered (#48).
+
+### Changed
+- **Rating score is now deterministic and continuous** — the precise 0–100 score
+  within the locked grade band is computed as a continuous function of the
+  dimension metrics (each normalized against a pinned ceiling, interpolated within
+  the band), instead of being picked by the agent. Two developers in the same band
+  now get different, metric-driven scores rather than clustering on the band
+  midpoint (the "everyone gets 98" problem). The agent is consulted only for the
+  grounding-checked reasoning and can change neither the grade nor the score (#48).
+
+### Added
+- **Rating change-scale dimension** — the rating now scores the **median changed
+  lines (additions + deletions) per PR**, counting code files only (generated,
+  vendored, lockfile, and config/doc files excluded so a reformat or regenerated
+  lockfile can't inflate it). `Evidence` gained `additions`/`deletions` fields
+  (populated by the `gh` extractors, serialized in portfolio JSON with backward-
+  compatible defaults). The grade is now four dimensions (max 8 pts) with a
+  re-tuned points→grade table, so **S requires substantial typical change size in
+  addition to volume/breadth/diversity** — it is no longer reachable on PR/file/
+  language counts alone (#50, toward de-saturating the rating, #48).
+
+### Changed
+- **Rating stack diversity counts programming languages only** — config, data,
+  markup, and documentation files (YAML, JSON, Markdown, HTML, CSS) no longer
+  count as distinct "languages", so a repo's ubiquitous README/CI/manifest files
+  can't inflate the diversity dimension (and thus the grade). Real code languages
+  (Python, Go, SQL, Shell, …) are unchanged. First step toward de-saturating the
+  rating, which currently maxes out at S for most active developers.
+
+### Added
 - **GitHub Enterprise Server support** — `--source-type github` now accepts a
   GHES repo URL (e.g. `https://ghe.example.com/<owner>/<repo>`); the host is
   passed through to `gh` as `[HOST/]OWNER/REPO` so the call routes to that server

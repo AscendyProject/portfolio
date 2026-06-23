@@ -85,7 +85,7 @@ def test_to_dict_schema_version():
 
 
 def test_to_dict_evidence_fields():
-    """All Evidence fields (kind, ref, url, detail, context) are serialized."""
+    """All Evidence fields (kind, ref, url, detail, context, additions, deletions) are serialized."""
     p = _make_portfolio()
     d = portfolio_to_dict(p)
     e0 = d["evidence"][0]
@@ -94,6 +94,50 @@ def test_to_dict_evidence_fields():
     assert e0["url"] == "https://github.com/o/r/pull/1"
     assert e0["detail"] == "Add thing"
     assert e0["context"] == "ctx1"
+    assert e0["additions"] == 0
+    assert e0["deletions"] == 0
+
+
+def test_round_trip_preserves_change_size():
+    """Non-zero additions/deletions survive a to_json → from_json round-trip."""
+    p = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="PR#9", additions=123, deletions=45)],
+        claims=[],
+    )
+    result = portfolio_from_json(portfolio_to_json(p))
+    assert result.evidence[0].additions == 123
+    assert result.evidence[0].deletions == 45
+
+
+def test_evidence_without_change_size_defaults_to_zero():
+    """Backward compatibility: a v1 evidence dict written before the change-size
+    fields existed (no additions/deletions keys) deserializes to 0, not an error."""
+    legacy = {
+        "schema_version": 1,
+        "subject": "alice",
+        "evidence": [
+            {"kind": "pr", "ref": "PR#1", "url": "", "detail": "old", "context": ""}  # no additions/deletions
+        ],
+        "claims": [],
+    }
+    p = portfolio_from_dict(legacy)
+    assert p.evidence[0].additions == 0
+    assert p.evidence[0].deletions == 0
+
+
+def test_negative_change_size_rejected():
+    """A negative additions/deletions value is rejected (defensive parse)."""
+    bad = {
+        "schema_version": 1,
+        "subject": "alice",
+        "evidence": [
+            {"kind": "pr", "ref": "PR#1", "url": "", "detail": "", "context": "", "additions": -1, "deletions": 0}
+        ],
+        "claims": [],
+    }
+    with pytest.raises(PortfolioStoreError):
+        portfolio_from_dict(bad)
 
 
 def test_to_dict_claim_fields():

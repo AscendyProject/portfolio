@@ -29,6 +29,8 @@ def portfolio_to_dict(p: Portfolio) -> dict:
                 "url": e.url,
                 "detail": e.detail,
                 "context": e.context,
+                "additions": e.additions,
+                "deletions": e.deletions,
             }
             for e in p.evidence
         ],
@@ -86,6 +88,17 @@ def portfolio_from_dict(data: object) -> Portfolio:
                 raise PortfolioStoreError(f"evidence[{i}] missing required field: {field!r}")
             if not isinstance(item[field], str):
                 raise PortfolioStoreError(f"evidence[{i}].{field} must be a str, got {type(item[field]).__name__}")
+        # additions/deletions are optional for backward compatibility with
+        # portfolios written before the change-scale field existed; default 0.
+        # bool is an int subclass, so reject it explicitly (matches schema_version).
+        line_counts: dict[str, int] = {}
+        for field in ("additions", "deletions"):
+            val = item.get(field, 0)
+            if not isinstance(val, int) or isinstance(val, bool):
+                raise PortfolioStoreError(f"evidence[{i}].{field} must be an int, got {type(val).__name__}")
+            if val < 0:
+                raise PortfolioStoreError(f"evidence[{i}].{field} must be non-negative, got {val}")
+            line_counts[field] = val
         evidence.append(
             Evidence(
                 kind=item["kind"],
@@ -93,6 +106,8 @@ def portfolio_from_dict(data: object) -> Portfolio:
                 url=item["url"],
                 detail=item["detail"],
                 context=item["context"],
+                additions=line_counts["additions"],
+                deletions=line_counts["deletions"],
             )
         )
 

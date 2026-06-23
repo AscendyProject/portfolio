@@ -166,10 +166,23 @@ a file instead of stdout.
 Run `python -m rating --source-type <type> --source <url> --author <handle>` to produce
 a grounded **capability assessment** — a deterministic grade (S/A/B/C/D) and rubric score
 (0–100) — from the developer's real evidence. The grade is computed deterministically from
-evidence-derived metrics (volume of merged PRs, breadth of changed files, stack diversity)
-and locks a score band; a temperature-0 agent grader then picks the precise score within
-that band and writes grounding-checked reasoning. Every metric cites the exact evidence
-refs it was computed from; un-grounded reasoning is dropped. **This command does NOT
+evidence-derived metrics (volume of merged PRs, breadth of changed files, stack diversity,
+and change scale) and locks a score band. The precise score within that band is also
+deterministic — a continuous function of the same metrics, so two developers in the same
+band get different scores rather than clustering on one value. The grade also carries a
+`+`/flat/`-` suffix (e.g. `B+`, `B`, `B-`) from the score's position within its band, so
+same-grade developers are visibly ordered. A temperature-0 agent writes only the
+grounding-checked reasoning; it changes neither the grade nor the score. Stack
+diversity counts distinct *programming* languages only — config/data/markup/documentation files
+(YAML, JSON, Markdown, HTML, CSS) are excluded so a repo's ubiquitous README/CI/manifest
+files don't inflate the count. Change scale is the median changed lines (additions +
+deletions) per PR over **code files only** — generated, vendored, lockfile, and
+config/doc files are excluded so a reformat or regenerated lockfile can't inflate it. Every metric cites the exact evidence
+refs it was computed from; un-grounded reasoning is dropped. The report also includes a
+deterministic **How to Improve** section that, per dimension, shows either that it is maxed
+or the next band and the exact raw delta needed to reach it (e.g. `Volume: Steady → High
+(≥20, +12)`) — rubric arithmetic over the developer's own metrics, never a population
+comparison. **This command does NOT
 produce an absolute percentile, global comparison, or any claim about the developer's
 standing relative to a population.** The `/rating` slash command is the interactive front
 door; `--out <file>` writes to a file instead of stdout.

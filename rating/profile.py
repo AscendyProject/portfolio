@@ -54,6 +54,16 @@ _EXT_TO_LANG: dict[str, str] = {
 # The underscore name is retained so existing imports keep working.
 EXT_TO_LANG = _EXT_TO_LANG
 
+# Languages that are configuration, data, markup, or documentation rather than
+# programming work. These are EXCLUDED from the stack-diversity metric: a
+# README (.md), CI/manifest config (.yaml/.yml/.json), and web markup/styling
+# (.html/.css) appear in nearly every repository regardless of the developer's
+# actual coding range, so counting them as distinct "languages" inflates
+# diversity for free (a `.py + .yaml + .json + .md` repo would otherwise score
+# as a 4-language polyglot). They still resolve via EXT_TO_LANG for display and
+# `language_for_ref`; only the diversity COUNT ignores them.
+_NON_CODE_LANGS: frozenset[str] = frozenset({"YAML", "JSON", "Markdown", "HTML", "CSS"})
+
 
 def language_for_ref(ref: str) -> str:
     """Return the language name for a given file ref using the fixed extension table.
@@ -94,14 +104,89 @@ _DIVERSITY_BANDS: list[tuple[str, int, int]] = [
     ("Focused", 0, 0),  # 0–1 → 0 pts
 ]
 
-# Points total → grade (highest threshold first).
+# Change scale: median code lines changed per PR (additions + deletions, code
+# files only — config/data/markup/docs and generated/vendored files are excluded
+# upstream by the extractor). Reflects typical change size, not raw volume.
+_SCALE_BANDS: list[tuple[str, int, int]] = [
+    ("Large", 150, 2),  # median 150+ changed lines/PR → 2 pts
+    ("Medium", 30, 1),  # 30–149 → 1 pt
+    ("Small", 0, 0),  # 0–29 → 0 pts
+]
+
+# Points total → grade (highest threshold first). Four dimensions × 2 pts → max 8.
+# S now requires maxing ALL four (incl. substantial typical change size), so it is
+# no longer reachable on volume/breadth/diversity alone — the prior saturation.
 _POINTS_TO_GRADE: list[tuple[int, str]] = [
-    (6, "S"),
-    (4, "A"),
-    (2, "B"),
-    (1, "C"),
+    (8, "S"),
+    (6, "A"),
+    (4, "B"),
+    (2, "C"),
     (0, "D"),
 ]
+
+
+def _median(values: list[int]) -> int:
+    """Median of a list of ints, rounded down to an int (0 for an empty list).
+    Pure; used for the change-scale metric."""
+    if not values:
+        return 0
+    ordered = sorted(values)
+    n = len(ordered)
+    mid = n // 2
+    if n % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) // 2
+
+
+# Reference ceiling per dimension for the continuous score: the raw metric value
+# at which a dimension is treated as a full-strength showing (normalized sub-score
+# = 1.0). Pinned in code (a model never sets these) and deliberately set ABOVE the
+# top band threshold, so the score keeps rising past the point where the discrete
+# grade saturates — this is what spreads scores out within a band.
+_SCORE_CEILINGS: dict[str, int] = {
+    "volume": 50,  # merged PRs
+    "breadth": 60,  # distinct code files
+    "stack_diversity": 6,  # distinct code languages
+    "scale": 400,  # median changed lines/PR
+}
+
+
+# Sub-tier suffixes within a grade, ordered bottom → top. The deterministic
+# score's position inside its band selects one: bottom third → "-", middle → ""
+# (flat), top third → "+". Refines the letter grade WITHOUT changing it — a "B+"
+# sits above a "B-", but both are grade B. The grade letter is the authoritative
+# tier; the suffix just shows where in the band the developer falls.
+_SUB_TIER_SYMBOLS: tuple[str, str, str] = ("-", "", "+")
+
+
+def _sub_tier(score: int, score_min: int, score_max: int) -> str:
+    """Sub-tier suffix ("+", "" or "-") from the score's position within its band:
+    top third → "+", middle → "" (flat), bottom → "-". A zero-width band (not
+    produced by the real rubric) maps to flat."""
+    span = score_max - score_min
+    if span <= 0:
+        return ""
+    fraction = (score - score_min) / span
+    index = min(2, max(0, int(fraction * 3)))
+    return _SUB_TIER_SYMBOLS[index]
+
+
+def _continuous_score(dimensions: dict[str, DimensionResult], score_min: int, score_max: int) -> int:
+    """A deterministic score inside [score_min, score_max].
+
+    Each dimension's raw value is normalized to [0,1] against its ceiling; the mean
+    position is interpolated within the locked band. Pure function of the metrics —
+    so two different portfolios in the same grade band get DIFFERENT scores, instead
+    of an agent freely picking (and clustering on) a number. The agent now writes
+    only the qualitative reasoning, never the score."""
+    positions: list[float] = []
+    for key, ceiling in _SCORE_CEILINGS.items():
+        dim = dimensions.get(key)
+        if dim is None or ceiling <= 0:
+            continue
+        positions.append(min(1.0, max(0.0, dim.value / ceiling)))
+    fraction = sum(positions) / len(positions) if positions else 0.0
+    return round(score_min + fraction * (score_max - score_min))
 
 
 def _band_for(value: int, bands: list[tuple[str, int, int]]) -> tuple[str, int]:
@@ -135,17 +220,25 @@ class DimensionResult:
 
 @dataclass
 class ProfileResult:
-    dimensions: dict[str, DimensionResult]  # "volume", "breadth", "stack_diversity"
+    dimensions: dict[str, DimensionResult]  # "volume", "breadth", "stack_diversity", "scale"
     grade: str  # S / A / B / C / D
     score_min: int
     score_max: int
+    # Deterministic continuous score inside [score_min, score_max], computed from
+    # the dimension metrics (default 0 so hand-built instances in tests stay valid).
+    score: int = 0
+    # Sub-tier suffix within the grade ("+", "" flat, or "-") from the score's
+    # band position; "" for hand-built instances that don't compute it (renders
+    # as the bare letter, indistinguishable from a flat mid-band tier).
+    sub_tier: str = ""
 
 
 def profile(portfolio: Portfolio) -> ProfileResult:
     """Pure deterministic profiler over a grounded Portfolio.
 
-    Returns metrics (volume, breadth, stack_diversity), per-dimension bands,
-    overall grade ∈ {S,A,B,C,D}, and a (min,max) score band.
+    Returns metrics (volume, breadth, stack_diversity, scale), per-dimension
+    bands, overall grade ∈ {S,A,B,C,D}, a (min,max) score band, a deterministic
+    continuous score inside that band, and a sub-tier suffix (+/flat/-).
 
     Makes NO subprocess, open, or network call — stdlib only.
     Unknown file extensions map to the literal string "other" (never guessed by a model).
@@ -162,16 +255,29 @@ def profile(portfolio: Portfolio) -> ProfileResult:
     breadth_count = len(file_refs)
     brd_band, brd_pts = _band_for(breadth_count, _BREADTH_BANDS)
 
-    # --- Stack diversity: distinct languages via the FIXED extension→language table ---
+    # --- Stack diversity: distinct PROGRAMMING languages via the FIXED table ---
+    # Config/data/markup/documentation languages (_NON_CODE_LANGS) are excluded
+    # so ubiquitous README/CI/manifest files don't inflate the count. code_file_refs
+    # are the refs that actually contributed a counted language.
     langs: set[str] = set()
+    code_file_refs: list[str] = []
     for ref in file_refs:
         ext = _file_ext(ref)
-        langs.add(_EXT_TO_LANG.get(ext, "other"))
+        lang = _EXT_TO_LANG.get(ext, "other")
+        if lang in _NON_CODE_LANGS:
+            continue
+        langs.add(lang)
+        code_file_refs.append(ref)
     diversity_count = len(langs)
     div_band, div_pts = _band_for(diversity_count, _DIVERSITY_BANDS)
 
+    # --- Change scale: median (additions + deletions) over the PR evidence ---
+    pr_evidence = [e for e in portfolio.evidence if e.kind == "pr"]
+    scale_value = _median([e.additions + e.deletions for e in pr_evidence])
+    scl_band, scl_pts = _band_for(scale_value, _SCALE_BANDS)
+
     # --- Overall grade from total points ---
-    total_pts = vol_pts + brd_pts + div_pts
+    total_pts = vol_pts + brd_pts + div_pts + scl_pts
     grade = "D"
     for threshold, g in _POINTS_TO_GRADE:
         if total_pts >= threshold:
@@ -200,13 +306,73 @@ def profile(portfolio: Portfolio) -> ProfileResult:
             value=diversity_count,
             band=div_band,
             points=div_pts,
-            evidence_refs=file_refs,  # the file refs used to derive language diversity
+            evidence_refs=code_file_refs,  # only refs that contributed a counted (code) language
+        ),
+        "scale": DimensionResult(
+            name="scale",
+            value=scale_value,
+            band=scl_band,
+            points=scl_pts,
+            evidence_refs=pr_refs,  # the PRs whose change sizes the median was taken over
         ),
     }
+
+    score = _continuous_score(dimensions, score_min, score_max)
+    sub_tier = _sub_tier(score, score_min, score_max)
 
     return ProfileResult(
         dimensions=dimensions,
         grade=grade,
         score_min=score_min,
         score_max=score_max,
+        score=score,
+        sub_tier=sub_tier,
     )
+
+
+# Dimension key → its band table, for the gap-to-next-band analysis.
+_DIMENSION_BANDS: dict[str, list[tuple[str, int, int]]] = {
+    "volume": _VOLUME_BANDS,
+    "breadth": _BREADTH_BANDS,
+    "stack_diversity": _DIVERSITY_BANDS,
+    "scale": _SCALE_BANDS,
+}
+
+
+@dataclass
+class ImprovementHint:
+    """Deterministic gap-to-next-band for one dimension: where it stands and what
+    would raise it. `at_top` means the dimension is already in its highest band
+    (no action); otherwise `next_band`/`threshold`/`delta` describe the cheapest
+    move that earns the next point. Pure rubric arithmetic — no model, no
+    population comparison."""
+
+    dimension: str  # dimension key (e.g. "scale")
+    value: int  # current raw metric value
+    current_band: str  # current band label
+    at_top: bool  # already in the highest band?
+    next_band: str  # next band label up ("" if at_top)
+    threshold: int  # raw value needed to reach next_band (0 if at_top)
+    delta: int  # threshold - value, i.e. how much more is needed (0 if at_top)
+
+
+def improvement_hints(profile_result: ProfileResult) -> list[ImprovementHint]:
+    """For each present dimension, the gap to the next band (deterministic, pure).
+
+    Iterates the dimensions actually present on `profile_result` (robust to a
+    partial result), mapping each to its band table. A dimension already at its
+    top band is returned with `at_top=True` and no delta. Compares only against
+    the fixed rubric thresholds — never against other people."""
+    hints: list[ImprovementHint] = []
+    for key, dim in profile_result.dimensions.items():
+        bands = _DIMENSION_BANDS.get(key)
+        if bands is None:
+            continue
+        ascending = sorted(bands, key=lambda b: b[1])  # low → high threshold
+        top_threshold = ascending[-1][1]
+        if dim.value >= top_threshold:
+            hints.append(ImprovementHint(key, dim.value, dim.band, True, "", 0, 0))
+            continue
+        nxt = next(b for b in ascending if b[1] > dim.value)  # lowest band above current value
+        hints.append(ImprovementHint(key, dim.value, dim.band, False, nxt[0], nxt[1], nxt[1] - dim.value))
+    return hints

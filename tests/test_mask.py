@@ -22,7 +22,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from portfolio.mask import (  # noqa: E402
+    MaskingError,
     _gh_visibility_lookup,
+    assert_maskable,
     extract_repo_names,
     mask_portfolio,
     private_repos,
@@ -1208,3 +1210,91 @@ def test_reference_check_cli_show_refs_and_mask_private(capsys):
     assert "private-repo-1" in captured.out
     # Raw private name must NOT appear
     assert "acme/svc" not in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Fail closed: --mask-private refuses non-github.com (GHES) hosts it can't mask
+# (codex review IR-001)
+# ---------------------------------------------------------------------------
+
+
+def test_assert_maskable_raises_for_ghes_host():
+    """A GitHub Enterprise Server evidence URL makes masking refuse (fail closed)."""
+    p = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="PR#1", url="https://ghe.example.com/owner/repo/pull/1")],
+        claims=[],
+    )
+    with pytest.raises(MaskingError, match="ghe.example.com"):
+        assert_maskable(p)
+
+
+def test_www_github_url_is_discovered_and_masked():
+    """www.github.com is in the maskable set, so discovery must also handle it —
+    a bare-ref portfolio with a www.github.com URL is discovered and masked, not
+    silently leaked (codex IR-002: guard and discovery must agree on hosts)."""
+    p = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="PR#1", url="https://www.github.com/acme/secret/pull/1")],
+        claims=[],
+    )
+    assert extract_repo_names(p) == {"acme/secret"}  # discovered despite the www. prefix
+    masked = mask_portfolio(p, private={"acme/secret"})
+    assert "acme/secret" not in masked.evidence[0].url
+
+
+def test_assert_maskable_allows_web_article_evidence():
+    """`--source-type web` article evidence has an arbitrary public content URL,
+    not a repo to mask — a non-github.com article host must NOT trip the guard
+    (regression: the GHES fail-closed check broke web + --mask-private)."""
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(
+                kind="article",
+                ref="https://blog.example.com/post",
+                url="https://blog.example.com/post",
+                detail="My Post",
+            )
+        ],
+        claims=[],
+    )
+    assert_maskable(p)  # must not raise — nothing to mask in a public article
+
+
+def test_assert_maskable_allows_github_com_and_bare_refs():
+    """github.com URLs, empty URLs, and bare refs do not trip the guard."""
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(kind="pr", ref="acme/svc#1", url="https://github.com/acme/svc/pull/1"),
+            Evidence(kind="pr", ref="PR#2", url=""),  # no URL → nothing to mask
+            Evidence(kind="file", ref="acme/svc:app/main.py"),
+        ],
+        claims=[],
+    )
+    assert_maskable(p)  # must not raise
+
+
+def test_rating_cli_mask_private_fails_closed_on_ghes(tmp_path, capsys):
+    """End-to-end: --mask-private over a portfolio with a GHES URL exits non-zero
+    with a clear error, and never emits the GHES repo unmasked."""
+    from portfolio.store import portfolio_to_json
+    from rating.cli import run
+
+    p = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="PR#1", url="https://ghe.example.com/acme/secret/pull/1", detail="work")],
+        claims=[Claim(text="did work", evidence_refs=["PR#1"], confidence=0.9, grounded=True)],
+    )
+    portfolio_file = tmp_path / "p.json"
+    portfolio_file.write_text(portfolio_to_json(p), encoding="utf-8")
+
+    code = run(
+        ["--source-type", "portfolio", "--source", str(portfolio_file), "--mask-private"],
+        visibility_lookup=lambda repo: True,
+    )
+    captured = capsys.readouterr()
+    assert code != 0  # refused, not a silent "masked 0"
+    assert "ghe.example.com" in captured.err  # clear reason on stderr
+    assert "acme/secret" not in captured.out  # never emitted unmasked

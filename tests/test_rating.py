@@ -34,21 +34,39 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _make_portfolio(subject: str = "alice") -> Portfolio:
-    """Standard test portfolio: 3 PRs + 5 distinct file refs (4 languages → Polyglot).
+    """Standard test portfolio: 3 PRs + 5 distinct file refs (4 code languages → Polyglot).
 
     volume=3 → Low (0 pts)
     breadth=5 → Narrow (0 pts)
-    stack_diversity=4 (Python, JavaScript, CSS, SQL) → Polyglot (2 pts)
-    total=2 → Grade B → score band 70–84
+    stack_diversity=4 (Python, JavaScript, Go, SQL) → Polyglot (2 pts)
+    scale=median(160) → Large (2 pts)
+    total=4 → Grade B → score band 70–84
+
+    All four diversity languages are real programming languages: non-code files
+    (config/data/markup/docs) are excluded from stack diversity, so a Polyglot
+    fixture must use code languages. Each PR carries 160 changed lines so the
+    median lands in the Large scale band (keeping the fixture at grade B now that
+    scale is a fourth dimension).
     """
     evidence = [
-        Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature"),
-        Evidence(kind="pr", ref="PR#2", url="https://github.com/o/r/pull/2", detail="Fix bug"),
-        Evidence(kind="pr", ref="PR#3", url="https://github.com/o/r/pull/3", detail="Refactor"),
+        Evidence(
+            kind="pr",
+            ref="PR#1",
+            url="https://github.com/o/r/pull/1",
+            detail="Add feature",
+            additions=120,
+            deletions=40,
+        ),
+        Evidence(
+            kind="pr", ref="PR#2", url="https://github.com/o/r/pull/2", detail="Fix bug", additions=120, deletions=40
+        ),
+        Evidence(
+            kind="pr", ref="PR#3", url="https://github.com/o/r/pull/3", detail="Refactor", additions=120, deletions=40
+        ),
         Evidence(kind="file", ref="app/main.py"),
         Evidence(kind="file", ref="app/utils.py"),
         Evidence(kind="file", ref="web/app.js"),
-        Evidence(kind="file", ref="web/style.css"),
+        Evidence(kind="file", ref="cmd/server.go"),
         Evidence(kind="file", ref="data/schema.sql"),
     ]
     claims = [
@@ -199,6 +217,100 @@ def test_unknown_extension_maps_to_other_never_guessed():
     assert result.dimensions["stack_diversity"].value == 1
 
 
+def test_config_doc_files_excluded_from_stack_diversity():
+    """Config/data/markup/documentation files (.yaml/.yml/.json/.md/.html/.css)
+    do NOT count toward stack diversity — a repo of only such files is Focused (0)."""
+    evidence = [
+        Evidence(kind="file", ref=".github/ci.yaml"),
+        Evidence(kind="file", ref="config/settings.yml"),
+        Evidence(kind="file", ref="package.json"),
+        Evidence(kind="file", ref="README.md"),
+        Evidence(kind="file", ref="index.html"),
+        Evidence(kind="file", ref="style.css"),
+    ]
+    portfolio = Portfolio(subject="dave", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["stack_diversity"].value == 0
+    assert result.dimensions["stack_diversity"].band == "Focused"
+
+
+def test_stack_diversity_counts_only_code_languages():
+    """A mix of code and config/doc files counts only the distinct CODE languages:
+    py + go among yaml/json/md noise → 2 (Python, Go), not 5."""
+    evidence = [
+        Evidence(kind="file", ref="app/main.py"),
+        Evidence(kind="file", ref="cmd/server.go"),
+        Evidence(kind="file", ref="ci.yaml"),
+        Evidence(kind="file", ref="package.json"),
+        Evidence(kind="file", ref="README.md"),
+    ]
+    portfolio = Portfolio(subject="erin", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["stack_diversity"].value == 2
+    # the dimension cites only the code refs that contributed a counted language
+    assert set(result.dimensions["stack_diversity"].evidence_refs) == {"app/main.py", "cmd/server.go"}
+
+
+# ---------------------------------------------------------------------------
+# Done-when: change-scale dimension (median changed lines per PR)
+# ---------------------------------------------------------------------------
+
+
+def test_scale_is_median_changed_lines_per_pr():
+    """scale value == median of (additions + deletions) over PR evidence."""
+    evidence = [
+        Evidence(kind="pr", ref="PR#1", additions=10, deletions=0),  # 10
+        Evidence(kind="pr", ref="PR#2", additions=100, deletions=100),  # 200
+        Evidence(kind="pr", ref="PR#3", additions=20, deletions=20),  # 40
+    ]
+    portfolio = Portfolio(subject="frank", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    # sorted changed lines: [10, 40, 200] → median 40
+    assert result.dimensions["scale"].value == 40
+    assert result.dimensions["scale"].band == "Medium"  # 30–149
+    # cites the PRs the median was taken over
+    assert set(result.dimensions["scale"].evidence_refs) == {"PR#1", "PR#2", "PR#3"}
+
+
+def test_scale_zero_when_no_prs():
+    """No PR evidence → scale 0 (Small), no crash on empty median."""
+    portfolio = Portfolio(subject="grace", evidence=[Evidence(kind="file", ref="a.py")], claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["scale"].value == 0
+    assert result.dimensions["scale"].band == "Small"
+
+
+def test_scale_large_band_lifts_grade():
+    """A small-but-substantial-PR developer (median 150+ changed lines) earns the
+    Large scale band's 2 points: here volume/breadth/diversity are all 0, so the
+    grade comes entirely from scale (2 pts → C), proving scale feeds the grade."""
+    evidence = [
+        Evidence(kind="pr", ref="PR#1", additions=300, deletions=50),  # 350
+        Evidence(kind="pr", ref="PR#2", additions=100, deletions=80),  # 180
+    ]
+    portfolio = Portfolio(subject="heidi", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["scale"].band == "Large"
+    assert result.dimensions["scale"].points == 2
+    assert result.grade == "C"  # 2 pts total → C under the 4-dimension rubric
+
+
+def test_grade_s_requires_all_four_dimensions_maxed():
+    """S (8 pts) is unreachable without the scale dimension: a developer who maxes
+    volume + breadth + diversity but has trivial PRs tops out at A, not S."""
+    evidence = [Evidence(kind="pr", ref=f"PR#{i}", additions=1, deletions=0) for i in range(20)]  # 20 PRs, 1 line each
+    evidence += [Evidence(kind="file", ref=f"src/m{i}.py") for i in range(15)]  # Python
+    evidence += [Evidence(kind="file", ref=f"web/c{i}.js") for i in range(15)]  # JavaScript → 30 files, 2 langs
+    evidence += [Evidence(kind="file", ref="cmd/s.go"), Evidence(kind="file", ref="q.sql")]  # 4 langs total
+    portfolio = Portfolio(subject="ivan", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["volume"].points == 2
+    assert result.dimensions["breadth"].points == 2
+    assert result.dimensions["stack_diversity"].points == 2
+    assert result.dimensions["scale"].points == 0  # median 1 changed line → Small
+    assert result.grade == "A"  # 6 pts, NOT S — the old rubric would have said S
+
+
 # ---------------------------------------------------------------------------
 # Done-when: evidence_refs are a subset of portfolio.evidence refs
 # ---------------------------------------------------------------------------
@@ -310,47 +422,133 @@ def test_grader_prompt_is_fixed():
 
 
 # ---------------------------------------------------------------------------
-# Done-when: score clamping
+# Done-when: deterministic continuous score (model cannot pick it)
 # ---------------------------------------------------------------------------
 
 
-def test_score_clamping_below_min():
-    """'a fake grader_runner returning a score below min yields min.'"""
+def test_score_is_deterministic_and_ignores_grader_number():
+    """The score comes from profile_result (deterministic metrics), NOT the grader:
+    two graders returning wildly different 'score' values yield the same score."""
     portfolio = _make_portfolio()
     profile_result = profile(portfolio)
-    assert profile_result.grade == "B"  # band 70–84
 
     def low_grader(prompt: str, temperature: int = 0) -> str:
-        return json.dumps({"score": 50, "reasoning": []})  # below min=70
-
-    grade_result = grade(portfolio, profile_result, low_grader)
-    assert grade_result.score == profile_result.score_min  # clamped to 70
-
-
-def test_score_clamping_above_max():
-    """'one returning a score above max yields max.'"""
-    portfolio = _make_portfolio()
-    profile_result = profile(portfolio)
-    assert profile_result.grade == "B"  # band 70–84
+        return json.dumps({"score": 1, "reasoning": [{"text": "x", "evidence_refs": ["PR#1"]}]})
 
     def high_grader(prompt: str, temperature: int = 0) -> str:
-        return json.dumps({"score": 95, "reasoning": []})  # above max=84
+        return json.dumps({"score": 999, "reasoning": [{"text": "y", "evidence_refs": ["PR#1"]}]})
 
-    grade_result = grade(portfolio, profile_result, high_grader)
-    assert grade_result.score == profile_result.score_max  # clamped to 84
+    g_low = grade(portfolio, profile_result, low_grader)
+    g_high = grade(portfolio, profile_result, high_grader)
+    assert g_low.score == g_high.score == profile_result.score
 
 
-def test_score_in_band_unchanged():
-    """'one returning a score inside the band yields that score unchanged.'"""
+def test_score_is_inside_the_locked_band():
+    """The deterministic score lies within [score_min, score_max]."""
     portfolio = _make_portfolio()
     profile_result = profile(portfolio)
-    assert profile_result.grade == "B"  # band 70–84
+    assert profile_result.grade == "B"
+    assert profile_result.score_min <= profile_result.score <= profile_result.score_max
 
-    def mid_grader(prompt: str, temperature: int = 0) -> str:
-        return json.dumps({"score": 77, "reasoning": []})  # within band
 
-    grade_result = grade(portfolio, profile_result, mid_grader)
-    assert grade_result.score == 77
+def test_scores_differ_within_the_same_band():
+    """Two portfolios in the SAME grade band but with different metrics get
+    DIFFERENT scores — the anti-clustering guarantee (no more everyone-gets-98)."""
+    # P1: grade B via stack diversity (2) + scale (2)
+    p1 = _make_portfolio()
+    # P2: grade B via volume (2) + breadth (2), trivial single-language PRs
+    evidence = [Evidence(kind="pr", ref=f"PR#{i}", additions=1, deletions=0) for i in range(50)]  # High volume
+    evidence += [Evidence(kind="file", ref=f"src/m{i}.py") for i in range(60)]  # Wide breadth, 1 language
+    p2 = Portfolio(subject="bob", evidence=evidence, claims=[])
+
+    r1, r2 = profile(p1), profile(p2)
+    assert r1.grade == r2.grade == "B"  # same band
+    assert r1.score != r2.score  # but distinguishable scores
+
+
+# ---------------------------------------------------------------------------
+# Done-when: sub-tier suffix within a grade (+/flat/-, e.g. B+ / B / B-)
+# ---------------------------------------------------------------------------
+
+
+def test_sub_tier_buckets_by_band_position():
+    """The suffix is selected by the score's position in its band: bottom third
+    → '-', middle → '' (flat), top → '+'. A zero-width band maps to flat."""
+    from rating.profile import _sub_tier
+
+    assert _sub_tier(70, 70, 84) == "-"  # bottom of band
+    assert _sub_tier(77, 70, 84) == ""  # middle (flat)
+    assert _sub_tier(84, 70, 84) == "+"  # top
+    assert _sub_tier(100, 100, 100) == ""  # zero-width band → flat, no crash
+
+
+def test_profile_assigns_sub_tier():
+    """profile() populates a sub_tier suffix for a real portfolio."""
+    result = profile(_make_portfolio())
+    assert result.sub_tier in {"+", "", "-"}
+
+
+def test_sub_tier_orders_within_same_grade():
+    """A stronger same-grade portfolio gets a higher (or equal) suffix than a
+    weaker one — the suffix refines, consistent with the score ordering."""
+    weak = profile(_make_portfolio())  # grade B, lower score
+    evidence = [Evidence(kind="pr", ref=f"PR#{i}", additions=1, deletions=0) for i in range(50)]
+    evidence += [Evidence(kind="file", ref=f"src/m{i}.py") for i in range(60)]
+    strong = profile(Portfolio(subject="bob", evidence=evidence, claims=[]))  # grade B, higher score
+    assert weak.grade == strong.grade == "B"
+    order = {"-": 0, "": 1, "+": 2}
+    assert order[strong.sub_tier] >= order[weak.sub_tier]
+
+
+def test_render_shows_grade_with_sub_tier():
+    """The rendered scorecard shows the suffix on the grade, e.g. 'Grade: B+' / 'B' / 'B-'."""
+    portfolio = _make_portfolio()
+    profile_result = profile(portfolio)
+    grade_result = grade(portfolio, profile_result, _make_simple_grader())
+    markdown = render_rating(portfolio, profile_result, grade_result)
+    assert f"Grade: {profile_result.grade}{profile_result.sub_tier}" in markdown
+
+
+# ---------------------------------------------------------------------------
+# Done-when: deterministic "how to improve" gap-to-next-band guidance
+# ---------------------------------------------------------------------------
+
+
+def test_improvement_hints_report_gap_to_next_band():
+    """For a below-top dimension, the hint names the next band and the raw delta;
+    a top-band dimension is flagged at_top with no delta."""
+    from rating.profile import improvement_hints
+
+    evidence = [
+        Evidence(kind="pr", ref="PR#1", additions=1, deletions=0),  # volume 1 → Low
+        Evidence(kind="file", ref="a.py"),
+        Evidence(kind="file", ref="b.go"),
+        Evidence(kind="file", ref="c.rs"),
+        Evidence(kind="file", ref="d.rb"),  # 4 code languages → Polyglot (top)
+    ]
+    result = profile(Portfolio(subject="x", evidence=evidence, claims=[]))
+    hints = {h.dimension: h for h in improvement_hints(result)}
+
+    # volume = 1 → Low, next band Steady at 5 → needs +4
+    assert hints["volume"].at_top is False
+    assert hints["volume"].next_band == "Steady"
+    assert hints["volume"].threshold == 5
+    assert hints["volume"].delta == 4
+
+    # stack diversity = 4 languages → Polyglot is the top band → maxed, no delta
+    assert hints["stack_diversity"].at_top is True
+    assert hints["stack_diversity"].delta == 0
+
+
+def test_render_includes_how_to_improve_section():
+    """The scorecard renders a 'How to Improve' section listing per-dimension gaps."""
+    portfolio = _make_portfolio()
+    profile_result = profile(portfolio)
+    grade_result = grade(portfolio, profile_result, _make_simple_grader())
+    markdown = render_rating(portfolio, profile_result, grade_result)
+    assert "How to Improve" in markdown
+    # the fixture's volume (3) is below the next band, so a gap line with a delta shows
+    assert "→" in markdown and "+" in markdown
 
 
 # ---------------------------------------------------------------------------
@@ -440,18 +638,17 @@ def test_grounding_gate_drops_uncited_reasoning():
 
 
 def test_defensive_parse_invalid_json():
-    """'A malformed grader_runner response (invalid JSON) yields a clamped score at
-    the band midpoint and a safe non-empty reasoning section without crashing.'"""
+    """'A malformed grader_runner response (invalid JSON) keeps the deterministic
+    score and yields a safe non-empty reasoning section without crashing.'"""
     portfolio = _make_portfolio()
     profile_result = profile(portfolio)
     assert profile_result.grade == "B"
-    midpoint = (profile_result.score_min + profile_result.score_max) // 2
 
     def bad_grader(prompt: str, temperature: int = 0) -> str:
         return "this is not json at all"
 
     grade_result = grade(portfolio, profile_result, bad_grader)
-    assert grade_result.score == midpoint
+    assert grade_result.score == profile_result.score  # unaffected by the bad response
     assert len(grade_result.reasoning) > 0
     # No fabricated refs — all refs in reasoning must be in portfolio evidence
     evidence_refs = {e.ref for e in portfolio.evidence}
@@ -461,35 +658,31 @@ def test_defensive_parse_invalid_json():
 
 
 def test_defensive_parse_missing_fields():
-    """'A malformed grader_runner response (missing fields) yields midpoint + safe reasoning.'"""
+    """'A malformed grader_runner response (missing fields) keeps the deterministic
+    score and yields safe reasoning.'"""
     portfolio = _make_portfolio()
     profile_result = profile(portfolio)
-    midpoint = (profile_result.score_min + profile_result.score_max) // 2
 
     def missing_fields_grader(prompt: str, temperature: int = 0) -> str:
         return json.dumps({"unexpected_key": "unexpected_value"})
 
     grade_result = grade(portfolio, profile_result, missing_fields_grader)
-    assert grade_result.score == midpoint
+    assert grade_result.score == profile_result.score
     assert len(grade_result.reasoning) > 0
 
 
-def test_wrong_type_reasoning_falls_back_to_midpoint():
+def test_wrong_type_reasoning_falls_back_to_safe_reasoning():
     """'A malformed grader_runner response (reasoning is the wrong type, not a list)
-    yields midpoint + safe reasoning — a valid in-band score must not survive
-    malformed reasoning.'"""
+    keeps the deterministic score and yields safe reasoning.'"""
     portfolio = _make_portfolio()
     profile_result = profile(portfolio)
-    midpoint = (profile_result.score_min + profile_result.score_max) // 2
-    # The assertion is only meaningful if the model's score differs from midpoint.
-    assert profile_result.score_max != midpoint
 
     def wrong_type_reasoning(prompt: str, temperature: int = 0) -> str:
-        # Valid in-band score, but reasoning is a string, not a list of bullets.
-        return json.dumps({"score": profile_result.score_max, "reasoning": "all great"})
+        # reasoning is a string, not a list of bullets.
+        return json.dumps({"reasoning": "all great"})
 
     grade_result = grade(portfolio, profile_result, wrong_type_reasoning)
-    assert grade_result.score == midpoint  # not the model's in-band score
+    assert grade_result.score == profile_result.score
     assert len(grade_result.reasoning) > 0
 
 
