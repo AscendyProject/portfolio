@@ -34,12 +34,16 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _make_portfolio(subject: str = "alice") -> Portfolio:
-    """Standard test portfolio: 3 PRs + 5 distinct file refs (4 languages → Polyglot).
+    """Standard test portfolio: 3 PRs + 5 distinct file refs (4 code languages → Polyglot).
 
     volume=3 → Low (0 pts)
     breadth=5 → Narrow (0 pts)
-    stack_diversity=4 (Python, JavaScript, CSS, SQL) → Polyglot (2 pts)
+    stack_diversity=4 (Python, JavaScript, Go, SQL) → Polyglot (2 pts)
     total=2 → Grade B → score band 70–84
+
+    All four diversity languages are real programming languages: non-code files
+    (config/data/markup/docs) are excluded from stack diversity, so a Polyglot
+    fixture must use code languages.
     """
     evidence = [
         Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature"),
@@ -48,7 +52,7 @@ def _make_portfolio(subject: str = "alice") -> Portfolio:
         Evidence(kind="file", ref="app/main.py"),
         Evidence(kind="file", ref="app/utils.py"),
         Evidence(kind="file", ref="web/app.js"),
-        Evidence(kind="file", ref="web/style.css"),
+        Evidence(kind="file", ref="cmd/server.go"),
         Evidence(kind="file", ref="data/schema.sql"),
     ]
     claims = [
@@ -197,6 +201,40 @@ def test_unknown_extension_maps_to_other_never_guessed():
     result = profile(portfolio)
     # Both map to "other" → 1 distinct language ("other")
     assert result.dimensions["stack_diversity"].value == 1
+
+
+def test_config_doc_files_excluded_from_stack_diversity():
+    """Config/data/markup/documentation files (.yaml/.yml/.json/.md/.html/.css)
+    do NOT count toward stack diversity — a repo of only such files is Focused (0)."""
+    evidence = [
+        Evidence(kind="file", ref=".github/ci.yaml"),
+        Evidence(kind="file", ref="config/settings.yml"),
+        Evidence(kind="file", ref="package.json"),
+        Evidence(kind="file", ref="README.md"),
+        Evidence(kind="file", ref="index.html"),
+        Evidence(kind="file", ref="style.css"),
+    ]
+    portfolio = Portfolio(subject="dave", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["stack_diversity"].value == 0
+    assert result.dimensions["stack_diversity"].band == "Focused"
+
+
+def test_stack_diversity_counts_only_code_languages():
+    """A mix of code and config/doc files counts only the distinct CODE languages:
+    py + go among yaml/json/md noise → 2 (Python, Go), not 5."""
+    evidence = [
+        Evidence(kind="file", ref="app/main.py"),
+        Evidence(kind="file", ref="cmd/server.go"),
+        Evidence(kind="file", ref="ci.yaml"),
+        Evidence(kind="file", ref="package.json"),
+        Evidence(kind="file", ref="README.md"),
+    ]
+    portfolio = Portfolio(subject="erin", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["stack_diversity"].value == 2
+    # the dimension cites only the code refs that contributed a counted language
+    assert set(result.dimensions["stack_diversity"].evidence_refs) == {"app/main.py", "cmd/server.go"}
 
 
 # ---------------------------------------------------------------------------

@@ -54,6 +54,16 @@ _EXT_TO_LANG: dict[str, str] = {
 # The underscore name is retained so existing imports keep working.
 EXT_TO_LANG = _EXT_TO_LANG
 
+# Languages that are configuration, data, markup, or documentation rather than
+# programming work. These are EXCLUDED from the stack-diversity metric: a
+# README (.md), CI/manifest config (.yaml/.yml/.json), and web markup/styling
+# (.html/.css) appear in nearly every repository regardless of the developer's
+# actual coding range, so counting them as distinct "languages" inflates
+# diversity for free (a `.py + .yaml + .json + .md` repo would otherwise score
+# as a 4-language polyglot). They still resolve via EXT_TO_LANG for display and
+# `language_for_ref`; only the diversity COUNT ignores them.
+_NON_CODE_LANGS: frozenset[str] = frozenset({"YAML", "JSON", "Markdown", "HTML", "CSS"})
+
 
 def language_for_ref(ref: str) -> str:
     """Return the language name for a given file ref using the fixed extension table.
@@ -162,11 +172,19 @@ def profile(portfolio: Portfolio) -> ProfileResult:
     breadth_count = len(file_refs)
     brd_band, brd_pts = _band_for(breadth_count, _BREADTH_BANDS)
 
-    # --- Stack diversity: distinct languages via the FIXED extension→language table ---
+    # --- Stack diversity: distinct PROGRAMMING languages via the FIXED table ---
+    # Config/data/markup/documentation languages (_NON_CODE_LANGS) are excluded
+    # so ubiquitous README/CI/manifest files don't inflate the count. code_file_refs
+    # are the refs that actually contributed a counted language.
     langs: set[str] = set()
+    code_file_refs: list[str] = []
     for ref in file_refs:
         ext = _file_ext(ref)
-        langs.add(_EXT_TO_LANG.get(ext, "other"))
+        lang = _EXT_TO_LANG.get(ext, "other")
+        if lang in _NON_CODE_LANGS:
+            continue
+        langs.add(lang)
+        code_file_refs.append(ref)
     diversity_count = len(langs)
     div_band, div_pts = _band_for(diversity_count, _DIVERSITY_BANDS)
 
@@ -200,7 +218,7 @@ def profile(portfolio: Portfolio) -> ProfileResult:
             value=diversity_count,
             band=div_band,
             points=div_pts,
-            evidence_refs=file_refs,  # the file refs used to derive language diversity
+            evidence_refs=code_file_refs,  # only refs that contributed a counted (code) language
         ),
     }
 

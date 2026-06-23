@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Rating stack diversity counts programming languages only** — config, data,
+  markup, and documentation files (YAML, JSON, Markdown, HTML, CSS) no longer
+  count as distinct "languages", so a repo's ubiquitous README/CI/manifest files
+  can't inflate the diversity dimension (and thus the grade). Real code languages
+  (Python, Go, SQL, Shell, …) are unchanged. First step toward de-saturating the
+  rating, which currently maxes out at S for most active developers.
+
 ### Added
 - **GitHub Enterprise Server support** — `--source-type github` now accepts a
   GHES repo URL (e.g. `https://ghe.example.com/<owner>/<repo>`); the host is

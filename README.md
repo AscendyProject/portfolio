@@ -168,7 +168,10 @@ a grounded **capability assessment** — a deterministic grade (S/A/B/C/D) and r
 (0–100) — from the developer's real evidence. The grade is computed deterministically from
 evidence-derived metrics (volume of merged PRs, breadth of changed files, stack diversity)
 and locks a score band; a temperature-0 agent grader then picks the precise score within
-that band and writes grounding-checked reasoning. Every metric cites the exact evidence
+that band and writes grounding-checked reasoning. Stack diversity counts distinct
+*programming* languages only — config/data/markup/documentation files (YAML, JSON,
+Markdown, HTML, CSS) are excluded so a repo's ubiquitous README/CI/manifest files don't
+inflate the count. Every metric cites the exact evidence
 refs it was computed from; un-grounded reasoning is dropped. **This command does NOT
 produce an absolute percentile, global comparison, or any claim about the developer's
 standing relative to a population.** The `/rating` slash command is the interactive front
