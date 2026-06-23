@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Rating score is now deterministic and continuous** — the precise 0–100 score
+  within the locked grade band is computed as a continuous function of the
+  dimension metrics (each normalized against a pinned ceiling, interpolated within
+  the band), instead of being picked by the agent. Two developers in the same band
+  now get different, metric-driven scores rather than clustering on the band
+  midpoint (the "everyone gets 98" problem). The agent is consulted only for the
+  grounding-checked reasoning and can change neither the grade nor the score (#48).
+
 ### Added
 - **Rating change-scale dimension** — the rating now scores the **median changed
   lines (additions + deletions) per PR**, counting code files only (generated,

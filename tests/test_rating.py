@@ -422,47 +422,48 @@ def test_grader_prompt_is_fixed():
 
 
 # ---------------------------------------------------------------------------
-# Done-when: score clamping
+# Done-when: deterministic continuous score (model cannot pick it)
 # ---------------------------------------------------------------------------
 
 
-def test_score_clamping_below_min():
-    """'a fake grader_runner returning a score below min yields min.'"""
+def test_score_is_deterministic_and_ignores_grader_number():
+    """The score comes from profile_result (deterministic metrics), NOT the grader:
+    two graders returning wildly different 'score' values yield the same score."""
     portfolio = _make_portfolio()
     profile_result = profile(portfolio)
-    assert profile_result.grade == "B"  # band 70–84
 
     def low_grader(prompt: str, temperature: int = 0) -> str:
-        return json.dumps({"score": 50, "reasoning": []})  # below min=70
-
-    grade_result = grade(portfolio, profile_result, low_grader)
-    assert grade_result.score == profile_result.score_min  # clamped to 70
-
-
-def test_score_clamping_above_max():
-    """'one returning a score above max yields max.'"""
-    portfolio = _make_portfolio()
-    profile_result = profile(portfolio)
-    assert profile_result.grade == "B"  # band 70–84
+        return json.dumps({"score": 1, "reasoning": [{"text": "x", "evidence_refs": ["PR#1"]}]})
 
     def high_grader(prompt: str, temperature: int = 0) -> str:
-        return json.dumps({"score": 95, "reasoning": []})  # above max=84
+        return json.dumps({"score": 999, "reasoning": [{"text": "y", "evidence_refs": ["PR#1"]}]})
 
-    grade_result = grade(portfolio, profile_result, high_grader)
-    assert grade_result.score == profile_result.score_max  # clamped to 84
+    g_low = grade(portfolio, profile_result, low_grader)
+    g_high = grade(portfolio, profile_result, high_grader)
+    assert g_low.score == g_high.score == profile_result.score
 
 
-def test_score_in_band_unchanged():
-    """'one returning a score inside the band yields that score unchanged.'"""
+def test_score_is_inside_the_locked_band():
+    """The deterministic score lies within [score_min, score_max]."""
     portfolio = _make_portfolio()
     profile_result = profile(portfolio)
-    assert profile_result.grade == "B"  # band 70–84
+    assert profile_result.grade == "B"
+    assert profile_result.score_min <= profile_result.score <= profile_result.score_max
 
-    def mid_grader(prompt: str, temperature: int = 0) -> str:
-        return json.dumps({"score": 77, "reasoning": []})  # within band
 
-    grade_result = grade(portfolio, profile_result, mid_grader)
-    assert grade_result.score == 77
+def test_scores_differ_within_the_same_band():
+    """Two portfolios in the SAME grade band but with different metrics get
+    DIFFERENT scores — the anti-clustering guarantee (no more everyone-gets-98)."""
+    # P1: grade B via stack diversity (2) + scale (2)
+    p1 = _make_portfolio()
+    # P2: grade B via volume (2) + breadth (2), trivial single-language PRs
+    evidence = [Evidence(kind="pr", ref=f"PR#{i}", additions=1, deletions=0) for i in range(50)]  # High volume
+    evidence += [Evidence(kind="file", ref=f"src/m{i}.py") for i in range(60)]  # Wide breadth, 1 language
+    p2 = Portfolio(subject="bob", evidence=evidence, claims=[])
+
+    r1, r2 = profile(p1), profile(p2)
+    assert r1.grade == r2.grade == "B"  # same band
+    assert r1.score != r2.score  # but distinguishable scores
 
 
 # ---------------------------------------------------------------------------
@@ -552,18 +553,17 @@ def test_grounding_gate_drops_uncited_reasoning():
 
 
 def test_defensive_parse_invalid_json():
-    """'A malformed grader_runner response (invalid JSON) yields a clamped score at
-    the band midpoint and a safe non-empty reasoning section without crashing.'"""
+    """'A malformed grader_runner response (invalid JSON) keeps the deterministic
+    score and yields a safe non-empty reasoning section without crashing.'"""
     portfolio = _make_portfolio()
     profile_result = profile(portfolio)
     assert profile_result.grade == "B"
-    midpoint = (profile_result.score_min + profile_result.score_max) // 2
 
     def bad_grader(prompt: str, temperature: int = 0) -> str:
         return "this is not json at all"
 
     grade_result = grade(portfolio, profile_result, bad_grader)
-    assert grade_result.score == midpoint
+    assert grade_result.score == profile_result.score  # unaffected by the bad response
     assert len(grade_result.reasoning) > 0
     # No fabricated refs — all refs in reasoning must be in portfolio evidence
     evidence_refs = {e.ref for e in portfolio.evidence}
@@ -573,35 +573,31 @@ def test_defensive_parse_invalid_json():
 
 
 def test_defensive_parse_missing_fields():
-    """'A malformed grader_runner response (missing fields) yields midpoint + safe reasoning.'"""
+    """'A malformed grader_runner response (missing fields) keeps the deterministic
+    score and yields safe reasoning.'"""
     portfolio = _make_portfolio()
     profile_result = profile(portfolio)
-    midpoint = (profile_result.score_min + profile_result.score_max) // 2
 
     def missing_fields_grader(prompt: str, temperature: int = 0) -> str:
         return json.dumps({"unexpected_key": "unexpected_value"})
 
     grade_result = grade(portfolio, profile_result, missing_fields_grader)
-    assert grade_result.score == midpoint
+    assert grade_result.score == profile_result.score
     assert len(grade_result.reasoning) > 0
 
 
-def test_wrong_type_reasoning_falls_back_to_midpoint():
+def test_wrong_type_reasoning_falls_back_to_safe_reasoning():
     """'A malformed grader_runner response (reasoning is the wrong type, not a list)
-    yields midpoint + safe reasoning — a valid in-band score must not survive
-    malformed reasoning.'"""
+    keeps the deterministic score and yields safe reasoning.'"""
     portfolio = _make_portfolio()
     profile_result = profile(portfolio)
-    midpoint = (profile_result.score_min + profile_result.score_max) // 2
-    # The assertion is only meaningful if the model's score differs from midpoint.
-    assert profile_result.score_max != midpoint
 
     def wrong_type_reasoning(prompt: str, temperature: int = 0) -> str:
-        # Valid in-band score, but reasoning is a string, not a list of bullets.
-        return json.dumps({"score": profile_result.score_max, "reasoning": "all great"})
+        # reasoning is a string, not a list of bullets.
+        return json.dumps({"reasoning": "all great"})
 
     grade_result = grade(portfolio, profile_result, wrong_type_reasoning)
-    assert grade_result.score == midpoint  # not the model's in-band score
+    assert grade_result.score == profile_result.score
     assert len(grade_result.reasoning) > 0
 
 

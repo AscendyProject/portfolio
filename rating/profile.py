@@ -138,6 +138,37 @@ def _median(values: list[int]) -> int:
     return (ordered[mid - 1] + ordered[mid]) // 2
 
 
+# Reference ceiling per dimension for the continuous score: the raw metric value
+# at which a dimension is treated as a full-strength showing (normalized sub-score
+# = 1.0). Pinned in code (a model never sets these) and deliberately set ABOVE the
+# top band threshold, so the score keeps rising past the point where the discrete
+# grade saturates — this is what spreads scores out within a band.
+_SCORE_CEILINGS: dict[str, int] = {
+    "volume": 50,  # merged PRs
+    "breadth": 60,  # distinct code files
+    "stack_diversity": 6,  # distinct code languages
+    "scale": 400,  # median changed lines/PR
+}
+
+
+def _continuous_score(dimensions: dict[str, DimensionResult], score_min: int, score_max: int) -> int:
+    """A deterministic score inside [score_min, score_max].
+
+    Each dimension's raw value is normalized to [0,1] against its ceiling; the mean
+    position is interpolated within the locked band. Pure function of the metrics —
+    so two different portfolios in the same grade band get DIFFERENT scores, instead
+    of an agent freely picking (and clustering on) a number. The agent now writes
+    only the qualitative reasoning, never the score."""
+    positions: list[float] = []
+    for key, ceiling in _SCORE_CEILINGS.items():
+        dim = dimensions.get(key)
+        if dim is None or ceiling <= 0:
+            continue
+        positions.append(min(1.0, max(0.0, dim.value / ceiling)))
+    fraction = sum(positions) / len(positions) if positions else 0.0
+    return round(score_min + fraction * (score_max - score_min))
+
+
 def _band_for(value: int, bands: list[tuple[str, int, int]]) -> tuple[str, int]:
     """Return (band_name, points) for `value` against ordered bands (high → low)."""
     for name, threshold, pts in bands:
@@ -173,13 +204,17 @@ class ProfileResult:
     grade: str  # S / A / B / C / D
     score_min: int
     score_max: int
+    # Deterministic continuous score inside [score_min, score_max], computed from
+    # the dimension metrics (default 0 so hand-built instances in tests stay valid).
+    score: int = 0
 
 
 def profile(portfolio: Portfolio) -> ProfileResult:
     """Pure deterministic profiler over a grounded Portfolio.
 
     Returns metrics (volume, breadth, stack_diversity, scale), per-dimension
-    bands, overall grade ∈ {S,A,B,C,D}, and a (min,max) score band.
+    bands, overall grade ∈ {S,A,B,C,D}, a (min,max) score band, and a
+    deterministic continuous score inside that band.
 
     Makes NO subprocess, open, or network call — stdlib only.
     Unknown file extensions map to the literal string "other" (never guessed by a model).
@@ -258,9 +293,12 @@ def profile(portfolio: Portfolio) -> ProfileResult:
         ),
     }
 
+    score = _continuous_score(dimensions, score_min, score_max)
+
     return ProfileResult(
         dimensions=dimensions,
         grade=grade,
         score_min=score_min,
         score_max=score_max,
+        score=score,
     )
