@@ -510,6 +510,48 @@ def test_render_shows_grade_with_sub_tier():
 
 
 # ---------------------------------------------------------------------------
+# Done-when: deterministic "how to improve" gap-to-next-band guidance
+# ---------------------------------------------------------------------------
+
+
+def test_improvement_hints_report_gap_to_next_band():
+    """For a below-top dimension, the hint names the next band and the raw delta;
+    a top-band dimension is flagged at_top with no delta."""
+    from rating.profile import improvement_hints
+
+    evidence = [
+        Evidence(kind="pr", ref="PR#1", additions=1, deletions=0),  # volume 1 → Low
+        Evidence(kind="file", ref="a.py"),
+        Evidence(kind="file", ref="b.go"),
+        Evidence(kind="file", ref="c.rs"),
+        Evidence(kind="file", ref="d.rb"),  # 4 code languages → Polyglot (top)
+    ]
+    result = profile(Portfolio(subject="x", evidence=evidence, claims=[]))
+    hints = {h.dimension: h for h in improvement_hints(result)}
+
+    # volume = 1 → Low, next band Steady at 5 → needs +4
+    assert hints["volume"].at_top is False
+    assert hints["volume"].next_band == "Steady"
+    assert hints["volume"].threshold == 5
+    assert hints["volume"].delta == 4
+
+    # stack diversity = 4 languages → Polyglot is the top band → maxed, no delta
+    assert hints["stack_diversity"].at_top is True
+    assert hints["stack_diversity"].delta == 0
+
+
+def test_render_includes_how_to_improve_section():
+    """The scorecard renders a 'How to Improve' section listing per-dimension gaps."""
+    portfolio = _make_portfolio()
+    profile_result = profile(portfolio)
+    grade_result = grade(portfolio, profile_result, _make_simple_grader())
+    markdown = render_rating(portfolio, profile_result, grade_result)
+    assert "How to Improve" in markdown
+    # the fixture's volume (3) is below the next band, so a gap line with a delta shows
+    assert "→" in markdown and "+" in markdown
+
+
+# ---------------------------------------------------------------------------
 # Done-when: model cannot change the grade
 # ---------------------------------------------------------------------------
 

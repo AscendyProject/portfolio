@@ -101,6 +101,8 @@ LANGS: dict[str, dict] = {
         "dim_points_label": "Points",
         "evidence_refs_label": "Evidence refs",
         "section_assessment": "Assessment",
+        "section_improve": "How to Improve",
+        "improve_maxed": "maxed",
         "section_rubric": "Rubric",
         "rating_rubric": (
             "| Grade | Score band |\n"
@@ -199,6 +201,8 @@ LANGS: dict[str, dict] = {
         "dim_points_label": "점수",
         "evidence_refs_label": "근거 참조",
         "section_assessment": "종합 평가",
+        "section_improve": "점수 올리기",
+        "improve_maxed": "최고 단계",
         "section_rubric": "평가 기준",
         "rating_rubric": (
             "| 등급 | 점수 범위  |\n"

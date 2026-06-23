@@ -328,3 +328,51 @@ def profile(portfolio: Portfolio) -> ProfileResult:
         score=score,
         sub_tier=sub_tier,
     )
+
+
+# Dimension key → its band table, for the gap-to-next-band analysis.
+_DIMENSION_BANDS: dict[str, list[tuple[str, int, int]]] = {
+    "volume": _VOLUME_BANDS,
+    "breadth": _BREADTH_BANDS,
+    "stack_diversity": _DIVERSITY_BANDS,
+    "scale": _SCALE_BANDS,
+}
+
+
+@dataclass
+class ImprovementHint:
+    """Deterministic gap-to-next-band for one dimension: where it stands and what
+    would raise it. `at_top` means the dimension is already in its highest band
+    (no action); otherwise `next_band`/`threshold`/`delta` describe the cheapest
+    move that earns the next point. Pure rubric arithmetic — no model, no
+    population comparison."""
+
+    dimension: str  # dimension key (e.g. "scale")
+    value: int  # current raw metric value
+    current_band: str  # current band label
+    at_top: bool  # already in the highest band?
+    next_band: str  # next band label up ("" if at_top)
+    threshold: int  # raw value needed to reach next_band (0 if at_top)
+    delta: int  # threshold - value, i.e. how much more is needed (0 if at_top)
+
+
+def improvement_hints(profile_result: ProfileResult) -> list[ImprovementHint]:
+    """For each present dimension, the gap to the next band (deterministic, pure).
+
+    Iterates the dimensions actually present on `profile_result` (robust to a
+    partial result), mapping each to its band table. A dimension already at its
+    top band is returned with `at_top=True` and no delta. Compares only against
+    the fixed rubric thresholds — never against other people."""
+    hints: list[ImprovementHint] = []
+    for key, dim in profile_result.dimensions.items():
+        bands = _DIMENSION_BANDS.get(key)
+        if bands is None:
+            continue
+        ascending = sorted(bands, key=lambda b: b[1])  # low → high threshold
+        top_threshold = ascending[-1][1]
+        if dim.value >= top_threshold:
+            hints.append(ImprovementHint(key, dim.value, dim.band, True, "", 0, 0))
+            continue
+        nxt = next(b for b in ascending if b[1] > dim.value)  # lowest band above current value
+        hints.append(ImprovementHint(key, dim.value, dim.band, False, nxt[0], nxt[1], nxt[1] - dim.value))
+    return hints

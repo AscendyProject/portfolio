@@ -7,6 +7,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Rating "How to Improve" section** — the scorecard now explains, per dimension,
+  why the score is what it is and what would raise it: each dimension is either
+  marked maxed or shows the next band and the exact raw delta needed (e.g.
+  `Volume: Steady → High (≥20, +12)`). Deterministic rubric arithmetic over the
+  developer's own metrics — no model, no population comparison (localized en/ko)
+  (#55).
 - **Rating sub-tier suffix** — each letter grade now carries a `+`/flat/`-` suffix
   (e.g. `B+`, `B`, `B-`) from the deterministic score's position within its band
   (top third → `+`, middle → flat, bottom → `-`). Refines the grade without

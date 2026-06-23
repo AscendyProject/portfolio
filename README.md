@@ -178,7 +178,11 @@ diversity counts distinct *programming* languages only — config/data/markup/do
 files don't inflate the count. Change scale is the median changed lines (additions +
 deletions) per PR over **code files only** — generated, vendored, lockfile, and
 config/doc files are excluded so a reformat or regenerated lockfile can't inflate it. Every metric cites the exact evidence
-refs it was computed from; un-grounded reasoning is dropped. **This command does NOT
+refs it was computed from; un-grounded reasoning is dropped. The report also includes a
+deterministic **How to Improve** section that, per dimension, shows either that it is maxed
+or the next band and the exact raw delta needed to reach it (e.g. `Volume: Steady → High
+(≥20, +12)`) — rubric arithmetic over the developer's own metrics, never a population
+comparison. **This command does NOT
 produce an absolute percentile, global comparison, or any claim about the developer's
 standing relative to a population.** The `/rating` slash command is the interactive front
 door; `--out <file>` writes to a file instead of stdout.
