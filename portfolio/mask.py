@@ -15,6 +15,13 @@ from urllib.parse import urlparse
 
 from .model import Claim, Evidence, Portfolio
 
+
+class MaskingError(Exception):
+    """Raised when --mask-private cannot guarantee masking for the given evidence
+    (e.g. a GitHub Enterprise Server host that the discovery/visibility/relabel
+    path does not yet support). Fail closed rather than emit unmasked output."""
+
+
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 # Matches owner/repo#<digits> — strictly digits after #
 _PR_REF_RE = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$")
@@ -135,6 +142,37 @@ def extract_repo_names(portfolio: Portfolio) -> set[str]:
                 found.add(result)
 
     return found
+
+
+# Hosts whose repos the masking path can discover, look up, and relabel.
+_MASKABLE_HOSTS = frozenset({_GITHUB_HOST, "www.github.com"})
+
+
+def assert_maskable(portfolio: Portfolio) -> None:
+    """Fail closed when --mask-private cannot reliably mask this portfolio.
+
+    Repo discovery, the `gh repo view` visibility lookup, and relabeling all
+    assume github.com. A GitHub Enterprise Server URL (e.g.
+    `https://ghe.example.com/owner/repo/pull/1`) is therefore neither discovered
+    nor masked, so silently reporting "masked 0 private repo(s)" could emit a
+    private GHES repo unmasked. Refuse instead — under-masking private evidence
+    is worse than refusing the run. Raises MaskingError for the first non-
+    maskable host found.
+    """
+    for ev in portfolio.evidence:
+        if not ev.url:
+            continue
+        try:
+            host = urlparse(ev.url).hostname
+        except ValueError:
+            continue  # an unparseable URL yields no repo to mask anyway
+        if host and host not in _MASKABLE_HOSTS:
+            raise MaskingError(
+                f"--mask-private does not support host {host!r} (only github.com): "
+                f"private repos on GitHub Enterprise Server cannot be reliably masked, "
+                f"so the run is refused rather than risk emitting them unmasked. "
+                f"Re-run without --mask-private."
+            )
 
 
 def _gh_visibility_lookup(repo: str) -> bool:
