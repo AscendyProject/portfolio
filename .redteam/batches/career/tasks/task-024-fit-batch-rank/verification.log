@@ -1,0 +1,46 @@
+=== ruff check ===
+All checks passed!
+=== ruff format check ===
+67 files already formatted
+=== pytest ===
+============================= test session starts ==============================
+platform darwin -- Python 3.12.8, pytest-8.2.2, pluggy-1.6.0
+rootdir: /Users/kh/Documents/portfolio
+configfile: pyproject.toml
+plugins: langsmith-0.4.41, anyio-4.10.0
+collected 706 items
+
+tests/test_cli.py ............                                           [  1%]
+tests/test_extract.py ..............                                     [  3%]
+tests/test_extract_denylist.py ......................................... [  9%]
+...............                                                          [ 11%]
+tests/test_fit.py .....................................                  [ 16%]
+tests/test_fit_batch.py ...............................                  [ 21%]
+tests/test_fit_score_quality.py ...................................      [ 26%]
+tests/test_grounding.py .....                                            [ 26%]
+tests/test_i18n.py .................................                     [ 31%]
+tests/test_jd_keywords_unicode.py .......                                [ 32%]
+tests/test_jd_source.py ............                                     [ 34%]
+tests/test_lang_threading.py ........................................... [ 40%]
+.                                                                        [ 40%]
+tests/test_mask.py ..................................................... [ 48%]
+..                                                                       [ 48%]
+tests/test_merge.py ........................                             [ 51%]
+tests/test_narrative.py ........                                         [ 52%]
+tests/test_portfolio_source.py ..........................                [ 56%]
+tests/test_rating.py ........................................            [ 62%]
+tests/test_reference_check.py ..................                         [ 64%]
+tests/test_render.py .................................................   [ 71%]
+tests/test_resume_cli.py .................                               [ 74%]
+tests/test_resume_render.py .........................                    [ 77%]
+tests/test_resume_select.py ............................                 [ 81%]
+tests/test_sources.py .....................................              [ 86%]
+tests/test_stdout_encoding.py .........                                  [ 88%]
+tests/test_store.py .........................                            [ 91%]
+tests/test_subprocess_encoding.py ............                           [ 93%]
+tests/test_synthesis.py ...................                              [ 96%]
+tests/test_version.py .s                                                 [ 96%]
+tests/test_web.py ..........................                             [100%]
+
+======================== 705 passed, 1 skipped in 1.40s ========================
+✅ verify.sh OK
