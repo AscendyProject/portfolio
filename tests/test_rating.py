@@ -76,7 +76,7 @@ def _make_portfolio(subject: str = "alice") -> Portfolio:
     return Portfolio(subject=subject, evidence=evidence, claims=claims)
 
 
-def _fake_extractor(*, repo: str, author: str) -> list[Evidence]:
+def _fake_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
     """Returns canned Evidence for a github source; no network."""
     return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
 

@@ -51,7 +51,7 @@ def _read_buf(buf: io.BytesIO) -> bytes:
     return buf.getvalue()
 
 
-def _fake_extractor(*, repo: str, author: str) -> list[Evidence]:
+def _fake_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
     """Returns one canned Evidence; no network."""
     return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="feat")]
 

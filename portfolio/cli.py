@@ -94,6 +94,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source", help="source URL (a github repo URL, or an article URL for --source-type web)")
     parser.add_argument("--author", help="GitHub handle whose merged PRs are the evidence")
     parser.add_argument("--max-claims", type=int, default=12, help="max claims to draft (default: 12)")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=100,
+        help="max merged PRs to pull for github / github-author sources (default: 100)",
+    )
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
     parser.add_argument("--emit-portfolio", dest="emit_portfolio", help="write Portfolio JSON to this file")
     parser.add_argument(
@@ -131,11 +137,17 @@ def run(
     args = _build_parser().parse_args(argv)
     lang = args.lang or "en"
 
+    if args.limit < 1:
+        print(f"--limit must be >= 1, got {args.limit}", file=sys.stderr)
+        return 2
+
     # Resolve the source (validation/parse only — no extraction yet).
     try:
         resolved = resolve_source(
             args.source_type,
-            SourceRequest(source=args.source, author=args.author, extractor=extractor, fetcher=fetcher),
+            SourceRequest(
+                source=args.source, author=args.author, extractor=extractor, fetcher=fetcher, limit=args.limit
+            ),
         )
     except UnsupportedSourceError as exc:
         print(str(exc), file=sys.stderr)

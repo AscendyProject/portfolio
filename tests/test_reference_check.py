@@ -26,7 +26,7 @@ from reference_check.cli import run  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _fake_extractor(*, repo: str, author: str) -> list[Evidence]:
+def _fake_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
     """Returns canned Evidence for a github source; no network."""
     return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
 
@@ -236,7 +236,7 @@ def test_non_github_source_rejected(capsys):
     runner = _make_counter_runner(_NARRATE_ONE, _LETTER_ONE)
     extractor_calls = [0]
 
-    def recording_extractor(*, repo: str, author: str) -> list:
+    def recording_extractor(*, repo: str, author: str, limit: int = 100) -> list:
         extractor_calls[0] += 1
         return _fake_extractor(repo=repo, author=author)
 

@@ -23,7 +23,7 @@ from portfolio.model import Evidence  # noqa: E402 — after sys.path setup per 
 # ---------------------------------------------------------------------------
 
 
-def _fake_extractor(*, repo: str, author: str) -> list[Evidence]:
+def _fake_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
     """Stand-in for extract_merged_prs: returns canned Evidence, no network."""
     return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add thing")]
 
@@ -167,6 +167,32 @@ def test_web_run_renders_with_injected_fetcher(capsys):
 # ---------------------------------------------------------------------------
 # Done-when: an unparseable / malformed source is rejected without extracting
 # ---------------------------------------------------------------------------
+
+
+def test_limit_flag_threaded_to_extractor():
+    """`--limit N` reaches the extractor as limit=N."""
+    extractor, calls = _recording_extractor()
+    code = run(_github_argv() + ["--limit", "300"], extractor=extractor, runner=_fake_runner)
+    assert code == 0
+    assert calls[0]["limit"] == 300
+
+
+def test_default_limit_is_100():
+    """Without --limit, the extractor is called with the 100 default."""
+    extractor, calls = _recording_extractor()
+    code = run(_github_argv(), extractor=extractor, runner=_fake_runner)
+    assert code == 0
+    assert calls[0]["limit"] == 100
+
+
+def test_invalid_limit_rejected_without_extracting(capsys):
+    """`--limit 0` exits non-zero with a clear error and never extracts."""
+    extractor, calls = _recording_extractor()
+    code = run(_github_argv() + ["--limit", "0"], extractor=extractor, runner=_fake_runner)
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "limit" in captured.err.lower()
+    assert calls == []
 
 
 def test_non_github_source_rejected_without_extracting(capsys):
