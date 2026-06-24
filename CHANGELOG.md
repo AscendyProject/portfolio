@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **IR-001 — refuse before the first model call:** `resolve_and_optionally_mask`
+  now runs the masking guard (`assert_maskable`) on extracted evidence **before**
+  any call to the narrate runner or synthesis runner. Previously the guard ran
+  after `narrate`, meaning a private GHES repo's raw evidence could be sent to the
+  model before the run was refused. The new ordering is:
+  `extract → assert_maskable → narrate → ground → mask → synthesize`. When the
+  guard raises `MaskingError` no model call has been made; verified by a
+  counting-runner test that asserts call-count == 0 for both runners.
+- **IR-003 — close the ref-based GHES bypass:** `assert_maskable` now also
+  inspects the host label encoded in `ev.ref` in addition to `ev.url`. Evidence
+  with an empty `url` but a GHES-style ref (`ghe.host.com/owner/repo#n` — three or
+  more segments before `#` / `:`) is refused with `MaskingError`, so there is no
+  url-less bypass of the fail-closed guard. The `article` exemption is preserved.
+
 ## [0.5.0] — 2026-06-24
 
 A rating that finally discriminates at the top: the grade now comes from a single
