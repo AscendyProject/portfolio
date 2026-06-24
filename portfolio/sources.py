@@ -62,6 +62,10 @@ class SourceRequest:
     extractor: Callable[..., list[Evidence]] = extract_merged_prs
     fetcher: Callable[[str], str] = fetch_html
     author_extractor: Callable[..., list[Evidence]] = extract_authored_prs
+    # Max merged PRs to pull for the github / github-author sources (the `gh`
+    # --limit). Default mirrors the extractors' own default; the CLI can raise it
+    # to capture more of a prolific author's history. Ignored by web/portfolio.
+    limit: int = 100
 
 
 @dataclass(frozen=True)
@@ -125,7 +129,8 @@ def _github_handler(request: SourceRequest) -> ResolvedSource:
     repo = parse_github_source(request.source)  # validation; raises ValueError on a bad URL
     author = request.author
     extractor = request.extractor
-    return ResolvedSource(subject=author, extract=lambda: extractor(repo=repo, author=author))
+    limit = request.limit
+    return ResolvedSource(subject=author, extract=lambda: extractor(repo=repo, author=author, limit=limit))
 
 
 def _web_handler(request: SourceRequest) -> ResolvedSource:
@@ -158,7 +163,8 @@ def _github_author_handler(request: SourceRequest) -> ResolvedSource:
     extraction. `--source` is optional and ignored for this source type."""
     author = _validate_github_author(request.author)
     author_extractor = request.author_extractor
-    return ResolvedSource(subject=author, extract=lambda: author_extractor(author=author))
+    limit = request.limit
+    return ResolvedSource(subject=author, extract=lambda: author_extractor(author=author, limit=limit))
 
 
 def _portfolio_handler(request: SourceRequest) -> ResolvedSource:

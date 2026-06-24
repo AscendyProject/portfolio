@@ -23,7 +23,7 @@ from resume.cli import run  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-def _fake_extractor(*, repo: str, author: str) -> list[Evidence]:
+def _fake_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
     """Returns canned Evidence for a github source; no network."""
     return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
 
@@ -349,7 +349,7 @@ def test_evidence_ref_markdown_injection_escaped(tmp_path, capsys):
 
     injected_ref = "PR#1](_bad_)"  # would close a Markdown link if not escaped
 
-    def extractor_with_tricky_ref(*, repo: str, author: str) -> list[Evidence]:
+    def extractor_with_tricky_ref(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
         return [Evidence(kind="pr", ref=injected_ref, url="https://github.com/o/r/pull/1", detail="Tricky ref")]
 
     def runner_citing_tricky_ref(_prompt: str) -> str:

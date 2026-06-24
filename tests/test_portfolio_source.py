@@ -467,7 +467,7 @@ def test_portfolio_cli_source_type_portfolio_byte_identical_markdown(tmp_path, c
 
     evidence = [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add thing", context="")]
 
-    def fake_extractor(*, repo, author):
+    def fake_extractor(*, repo, author, limit=100):
         return evidence
 
     def fake_runner(_prompt):
@@ -519,7 +519,7 @@ def test_emit_portfolio_independent_of_out(tmp_path, capsys):
 
     evidence = [Evidence(kind="pr", ref="PR#1", url="", detail="", context="")]
 
-    def fake_extractor(*, repo, author):
+    def fake_extractor(*, repo, author, limit=100):
         return evidence
 
     def fake_runner(_prompt):
@@ -557,7 +557,7 @@ def test_emit_portfolio_oserror_exits_2(tmp_path, capsys):
 
     evidence = [Evidence(kind="pr", ref="PR#1", url="", detail="", context="")]
 
-    def fake_extractor(*, repo, author):
+    def fake_extractor(*, repo, author, limit=100):
         return evidence
 
     def fake_runner(_prompt):

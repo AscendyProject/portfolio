@@ -88,6 +88,10 @@ you must be logged into that host (`gh auth login --hostname ghe.example.com`).
 Pointing `--source-type web` at a code-host repo URL is **not** a substitute — it
 scrapes the page as an article and grounds nothing.
 
+`--limit N` (default 100) caps how many merged PRs the `github` / `github-author`
+sources pull. Raise it for a prolific author whose evidence is truncated at 100
+(e.g. `--limit 300`); the trade-off is more `gh` calls, so it runs slower.
+
 The rendered document leads with a grounded headline blockquote (model-authored, or a
 deterministic fallback when grounding fails), followed by a stats line showing merged-PR
 count, distinct repo count, and the detected language stack. When the model returns

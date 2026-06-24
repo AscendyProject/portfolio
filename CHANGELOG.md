@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`--limit` flag on `python -m portfolio`** — control how many merged PRs the
+  `github` / `github-author` sources pull (default 100, unchanged). Raise it to
+  capture more of a prolific author's history when 100 truncates the evidence;
+  threaded through the source dispatcher to the `gh` extractors.
+
 ## [0.4.0] — 2026-06-24
 
 Wider reach and a de-saturated rating: evaluate GitHub Enterprise Server repos,
