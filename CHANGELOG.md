@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Rating grade is now derived from a single continuous capability score** —
+  replaces the discrete points→grade (4 dims × 0/1/2). Each metric is mapped
+  through a piecewise curve toward absolute, product-defined anchors, weighted
+  into a 0–100 score (shown to one decimal); the grade is the band that score
+  falls in. This fixes a clustering the points model still had: strong developers
+  who maxed volume/breadth/diversity all landed on the *same* score (~92) — the
+  curves now keep large values separated, so a 200-PR and a 100-PR developer
+  differ. A **substance cap** (median changed lines/PR) stops a high-volume bot of
+  trivial PRs from reaching a top grade, and an **S guard** keeps S rare (genuinely
+  all-around-substantial work only). Per-dimension `points` are gone from the
+  scorecard (the grade is no longer their sum); dimensions still show value + band.
+  Designed and validated on real portfolios via an adversarial Claude↔codex review
+  (#48).
+
 ### Added
 - **`--limit` flag on `python -m portfolio`** — control how many merged PRs the
   `github` / `github-author` sources pull (default 100, unchanged). Raise it to
