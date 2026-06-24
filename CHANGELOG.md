@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-06-24
+
+A rating that finally discriminates at the top: the grade now comes from a single
+continuous capability score, so two strong developers no longer collapse to the
+same number — plus `--limit` to pull more of a prolific author's history.
+
 ### Changed
 - **Rating grade is now derived from a single continuous capability score** —
   replaces the discrete points→grade (4 dims × 0/1/2). Each metric is mapped
@@ -135,7 +141,8 @@ anonymize private repos before sharing.
 - Dropped the `ascendy-` prefix; the harness/repo is now `portfolio` (#8).
 - Upgraded the vendored redteam harness to 0.4.0 (#21).
 
-[Unreleased]: https://github.com/AscendyProject/portfolio/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/AscendyProject/portfolio/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/AscendyProject/portfolio/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AscendyProject/portfolio/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/AscendyProject/portfolio/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/AscendyProject/portfolio/releases/tag/v0.2.0
