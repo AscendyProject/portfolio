@@ -286,6 +286,20 @@ def test_scale_zero_when_no_prs():
     assert result.dimensions["scale"].band == "Small"
 
 
+def test_score_never_exceeds_its_grade_band():
+    """A score can never land in the (95, 96) gap between the A and S bands: a
+    guard-meeting portfolio whose raw score is in the 95.x range is pulled to the
+    A-band max, so the rendered score never exceeds the band shown for its grade
+    (codex IR-001). Checked on the concrete repro + the shared fixtures."""
+    exts = (".py", ".js", ".go", ".sql")
+    # repro: 300 PRs, 1600 files (meets the S guard's breadth axis), median 120 — raw ≈ 95.8
+    ev = [Evidence(kind="pr", ref=f"P{i}", additions=80, deletions=40) for i in range(300)]
+    ev += [Evidence(kind="file", ref=f"s/m{i}{exts[i % 4]}") for i in range(1600)]
+    r = profile(Portfolio(subject="edge", evidence=ev, claims=[]))
+    assert r.score_min <= r.score <= r.score_max
+    assert not (95 < r.score < 96)  # the A/S gap is unreachable
+
+
 def test_s_is_gated_on_substance_not_volume_breadth():
     """S cannot be reached by raw volume/breadth alone: a developer who maxes volume
     and breadth but ships trivial PRs (tiny median change) is held well below S by

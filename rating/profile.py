@@ -190,10 +190,16 @@ def _capability_score(metrics: dict[str, int]) -> float:
     values. Pure function — the model never picks it, so it cannot cluster."""
     q = sum(weight * _curve(metrics[key], a, b, c) for key, a, b, c, weight in _CAPABILITY_CURVES)
     base = (85.0 / 0.55) * q if q < 0.55 else 85.0 + 11.0 * (q - 0.55) / 0.40
-    base = min(base, _substance_cap(metrics["scale"]))
-    if not _meets_s_guard(metrics["volume"], metrics["breadth"], metrics["scale"], metrics["stack_diversity"]):
+    base = min(100.0, max(0.0, min(base, _substance_cap(metrics["scale"]))))
+    # A score reaches S ONLY if it both clears the S floor (96) AND meets the S
+    # guard; otherwise it is at most an A and is capped at the A-band max. This
+    # also closes the (95, 96) gap between the A and S bands, so a score can never
+    # exceed the band reported for its derived grade.
+    s_floor = GRADE_BANDS["S"][0]
+    guard = _meets_s_guard(metrics["volume"], metrics["breadth"], metrics["scale"], metrics["stack_diversity"])
+    if base < s_floor or not guard:
         base = min(base, _NON_S_CAP)
-    return round(min(100.0, max(0.0, base)), 1)
+    return round(base, 1)
 
 
 def _grade_for_score(score: float) -> str:
