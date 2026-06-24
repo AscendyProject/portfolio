@@ -347,9 +347,9 @@ def test_evidence_refs_are_subset_of_portfolio():
     result = profile(portfolio)
     all_evidence_refs = {e.ref for e in portfolio.evidence}
     for dim in result.dimensions.values():
-        assert set(dim.evidence_refs).issubset(
-            all_evidence_refs
-        ), f"dimension {dim.name!r} has refs not in portfolio.evidence"
+        assert set(dim.evidence_refs).issubset(all_evidence_refs), (
+            f"dimension {dim.name!r} has refs not in portfolio.evidence"
+        )
 
 
 # ---------------------------------------------------------------------------
