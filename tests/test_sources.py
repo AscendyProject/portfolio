@@ -68,9 +68,27 @@ def test_bad_github_url_raises_before_extraction():
     with pytest.raises(ValueError):
         resolve_source(
             "github",
-            SourceRequest(source="https://gitlab.com/owner/repo", author="alice", extractor=extractor),
+            SourceRequest(source="https://github.com/owner", author="alice", extractor=extractor),  # missing repo
         )
     assert calls == []
+
+
+def test_github_enterprise_host_resolves_host_qualified():
+    """A GitHub Enterprise Server URL resolves to a host-qualified repo spec
+    (`host/owner/repo`) passed to the extractor, so `gh --repo` routes to that
+    server instead of github.com."""
+    extractor, calls = _recording_extractor()
+    resolved = resolve_source(
+        "github",
+        SourceRequest(
+            source="https://github.sec.samsung.net/bdp/data-integration-platform",
+            author="hunmin1-park",
+            extractor=extractor,
+        ),
+    )
+    resolved.extract()
+    assert calls[0]["repo"] == "github.sec.samsung.net/bdp/data-integration-platform"
+    assert calls[0]["author"] == "hunmin1-park"
 
 
 def test_github_requires_source_and_author():
@@ -168,17 +186,27 @@ def test_registering_a_handler_makes_a_new_type_resolvable():
         ("https://github.com/owner/repo/", "owner/repo"),  # trailing slash
         ("https://github.com/owner/repo.git", "owner/repo"),  # .git suffix
         ("http://github.com/owner/repo", "owner/repo"),  # http accepted
+        ("https://www.github.com/owner/repo", "owner/repo"),  # www host stays bare
+        # GitHub Enterprise Server hosts -> host-qualified (host/owner/repo)
+        (
+            "https://github.sec.samsung.net/bdp/data-integration-platform",
+            "github.sec.samsung.net/bdp/data-integration-platform",
+        ),
+        ("https://ghe.example.com/owner/repo/", "ghe.example.com/owner/repo"),  # trailing slash
+        ("https://ghe.example.com/owner/repo.git", "ghe.example.com/owner/repo"),  # .git suffix
     ],
 )
 def test_parse_github_source_accepts(url, expected):
-    """A clean GitHub repo URL parses to owner/repo (trailing slash / .git / http tolerated)."""
+    """A clean GitHub(.com or Enterprise) repo URL parses to the repo spec
+    (trailing slash / .git / http tolerated; non-github.com hosts host-qualified)."""
     assert parse_github_source(url) == expected
 
 
 @pytest.mark.parametrize(
     "url",
     [
-        "https://gitlab.com/owner/repo",  # wrong host
+        "https://localhost/owner/repo",  # bare-label host (no dot) -> not a repo host
+        "https:///owner/repo",  # empty host
         "https://github.com/owner",  # missing repo
         "https://github.com/owner/repo/pull/1",  # extra path segments -> reject, don't guess
         "https://github.com/owner//repo",  # empty middle segment -> reject, don't collapse
@@ -303,3 +331,38 @@ def test_github_author_valid_handles_accepted(author):
         SourceRequest(source=None, author=author, author_extractor=author_extractor),
     )
     assert resolved.subject == author
+
+
+# ---------------------------------------------------------------------------
+# limit threading (the gh --limit, raised via the CLI --limit flag)
+# ---------------------------------------------------------------------------
+
+
+def test_github_threads_limit_to_extractor():
+    """SourceRequest.limit reaches the github extractor."""
+    extractor, calls = _recording_extractor()
+    resolve_source(
+        "github",
+        SourceRequest(source="https://github.com/o/r", author="alice", extractor=extractor, limit=500),
+    ).extract()
+    assert calls[0]["limit"] == 500
+
+
+def test_github_limit_defaults_to_100():
+    """An unset limit defaults to 100 (mirrors the extractor default)."""
+    extractor, calls = _recording_extractor()
+    resolve_source(
+        "github",
+        SourceRequest(source="https://github.com/o/r", author="alice", extractor=extractor),
+    ).extract()
+    assert calls[0]["limit"] == 100
+
+
+def test_github_author_threads_limit_to_extractor():
+    """SourceRequest.limit reaches the github-author extractor."""
+    author_extractor, calls = _recording_author_extractor()
+    resolve_source(
+        "github-author",
+        SourceRequest(source=None, author="alice", author_extractor=author_extractor, limit=250),
+    ).extract()
+    assert calls[0]["limit"] == 250

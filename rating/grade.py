@@ -1,12 +1,12 @@
 """Bounded agent grader.
 
-Calls an injectable grader_runner deterministically (temperature=0), clamps the
-score to the locked band, grounding-checks the reasoning bullets (drops any bullet
-whose evidence_refs ⊄ portfolio.evidence refs), and handles malformed responses
-defensively (midpoint score + safe reasoning, no crash, no fabricated refs).
-
-The model may NOT change the grade — grade is always the deterministic grade
-computed by rating.profile.profile().
+The grade AND the score are both deterministic, computed by
+rating.profile.profile() (`grade` and the continuous `score`). The model is
+called (temperature=0) ONLY to write the qualitative reasoning: this function
+grounding-checks those bullets (dropping any whose evidence_refs ⊄
+portfolio.evidence refs) and handles malformed responses defensively (safe
+reasoning, no crash, no fabricated refs). The model may change neither the
+grade nor the score — removing the free, clustering score-pick.
 """
 
 from __future__ import annotations
@@ -54,65 +54,47 @@ def _build_prompt(portfolio: Portfolio, profile_result: ProfileResult, lang: str
         f"SCORE BAND: {score_min}–{score_max}\n\n"
         f"GROUNDED CLAIMS:\n{claims_text}\n\n"
         f"ALLOWED EVIDENCE REFS: {allowed_refs}\n\n"
-        f"Your job: pick a score between {score_min} and {score_max} (inclusive) and write "
-        f"concise reasoning bullets. Each bullet MUST cite at least one ref from "
-        f"ALLOWED EVIDENCE REFS. "
-        f"You MUST NOT change the grade. "
+        f"Your job: write concise reasoning bullets explaining this assessment. The grade and "
+        f"score are fixed by deterministic metrics — you do NOT choose them. Each bullet MUST "
+        f"cite at least one ref from ALLOWED EVIDENCE REFS. "
         f"You MUST NOT claim a percentile, comparison to a population, or external baseline.\n\n"
         f"Output STRICT JSON only:\n"
-        f'{{"score": <integer {score_min}–{score_max}>, '
-        f'"reasoning": [{{"text": "<bullet>", "evidence_refs": ["<ref>", ...]}}]}}\n'
+        f'{{"reasoning": [{{"text": "<bullet>", "evidence_refs": ["<ref>", ...]}}]}}\n'
         f"No prose, no code fences. JSON only.\n\n"
         f"Write all prose in {language_name(lang)}."
     )
 
 
-def _midpoint(score_min: int, score_max: int) -> int:
-    return (score_min + score_max) // 2
-
-
 _SAFE_REASONING = [{"text": "Assessment based on grounded evidence.", "evidence_refs": []}]
 
 
-def _parse_response(
-    raw: str,
-    portfolio: Portfolio,
-    score_min: int,
-    score_max: int,
-) -> tuple[int, list[dict]]:
-    """Parse and validate the grader response.
+def _parse_reasoning(raw: str, portfolio: Portfolio) -> list[dict]:
+    """Parse and grounding-check the grader's reasoning bullets.
 
-    Returns (clamped_score, grounding-checked reasoning).
-    Malformed response → (midpoint, safe reasoning).
-    Reasoning bullets whose evidence_refs ⊄ portfolio.evidence refs are dropped.
-    """
+    Returns grounding-checked reasoning; a malformed response (non-JSON, non-dict,
+    wrong-typed or empty-after-grounding reasoning) yields the safe reasoning. The
+    grader's response no longer carries a score — the score is deterministic.
+    Bullets whose evidence_refs ⊄ portfolio.evidence refs (or that cite nothing)
+    are dropped (IR-002)."""
     evidence_refs_set = {e.ref for e in portfolio.evidence}
 
     text = raw.strip()
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1 or end < start:
-        return _midpoint(score_min, score_max), list(_SAFE_REASONING)
+        return list(_SAFE_REASONING)
 
     try:
         data = json.loads(text[start : end + 1])
     except json.JSONDecodeError:
-        return _midpoint(score_min, score_max), list(_SAFE_REASONING)
+        return list(_SAFE_REASONING)
 
     if not isinstance(data, dict):
-        return _midpoint(score_min, score_max), list(_SAFE_REASONING)
+        return list(_SAFE_REASONING)
 
-    # Parse and clamp score.
-    raw_score = data.get("score")
-    if not isinstance(raw_score, (int, float)):
-        score = _midpoint(score_min, score_max)
-    else:
-        score = max(score_min, min(score_max, int(raw_score)))
-
-    # Parse and grounding-check reasoning bullets.
     raw_reasoning = data.get("reasoning")
     if not isinstance(raw_reasoning, list):
-        return _midpoint(score_min, score_max), list(_SAFE_REASONING)
+        return list(_SAFE_REASONING)
 
     checked: list[dict] = []
     for item in raw_reasoning:
@@ -131,10 +113,7 @@ def _parse_response(
         if refs and all(r in evidence_refs_set for r in refs):
             checked.append({"text": text_val.strip(), "evidence_refs": refs})
 
-    if not checked:
-        return score, list(_SAFE_REASONING)
-
-    return score, checked
+    return checked or list(_SAFE_REASONING)
 
 
 def grade(
@@ -145,16 +124,16 @@ def grade(
 ) -> GradeResult:
     """Call grader_runner deterministically and return a bounded GradeResult.
 
-    The grade is ALWAYS taken from profile_result (model cannot change it).
-    The score is clamped to [score_min, score_max].
-    Reasoning bullets whose refs are not in portfolio.evidence are dropped.
-    Malformed grader responses yield midpoint score + safe reasoning (no crash).
+    Both the grade AND the score are taken from profile_result — the model
+    cannot change either. The grader_runner is consulted only for the qualitative
+    reasoning, which is grounding-checked; a malformed response yields safe
+    reasoning (no crash, no fabricated refs).
     """
     prompt = _build_prompt(portfolio, profile_result, lang=lang)
     raw = grader_runner(prompt, temperature=0)
-    score, reasoning = _parse_response(raw, portfolio, profile_result.score_min, profile_result.score_max)
+    reasoning = _parse_reasoning(raw, portfolio)
     return GradeResult(
-        score=score,
-        grade=profile_result.grade,  # model cannot change the grade
+        score=profile_result.score,  # deterministic; model cannot change it
+        grade=profile_result.grade,  # deterministic; model cannot change it
         reasoning=reasoning,
     )

@@ -49,7 +49,7 @@ def _make_jd(tmp_path: Path, text: str = "python backend engineer") -> str:
     return str(p)
 
 
-def _fake_extractor(*, repo: str, author: str) -> list[Evidence]:
+def _fake_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
     """Returns canned Evidence for a github source; no network."""
     return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
 
@@ -474,7 +474,7 @@ def test_bad_source_url_exits_nonzero(tmp_path, capsys):
             "--source-type",
             "github",
             "--source",
-            "https://gitlab.com/owner/repo",
+            "https://github.com/owner",
             "--author",
             "alice",
             "--jd",

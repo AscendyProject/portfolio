@@ -132,10 +132,15 @@ def resolve_and_optionally_mask(
         _build_relabel_map,
         _gh_visibility_lookup,
         _rewrite_text,
+        assert_maskable,
         extract_repo_names,
         mask_portfolio,
         private_repos,
     )
+
+    # Fail closed before discovery: refuse rather than under-mask evidence from a
+    # host the masking path can't handle (e.g. GitHub Enterprise Server).
+    assert_maskable(no_synth_result.portfolio)
 
     lk = visibility_lookup if visibility_lookup is not None else _gh_visibility_lookup
     repos = extract_repo_names(no_synth_result.portfolio)

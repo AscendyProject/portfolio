@@ -233,7 +233,7 @@ def test_no_english_ui_leak_rating_renderer():
         score_min=70,
         score_max=84,
         dimensions={
-            "volume": DimensionResult(name="volume", value=3, band="Low", points=0, evidence_refs=["PR#1"]),
+            "volume": DimensionResult(name="volume", value=3, band="Low", evidence_refs=["PR#1"]),
         },
     )
     grade_result = GradeResult(
@@ -352,7 +352,7 @@ def test_extensibility_prompt_builders_language_name(monkeypatch):
         grade="B",
         score_min=70,
         score_max=84,
-        dimensions={"volume": DimensionResult(name="volume", value=1, band="Low", points=0, evidence_refs=["PR#1"])},
+        dimensions={"volume": DimensionResult(name="volume", value=1, band="Low", evidence_refs=["PR#1"])},
     )
     rating_prompt = rating_build_prompt(test_portfolio, profile_result, lang="xx")
     assert "Xhosa" in rating_prompt, "rating _build_prompt does not contain language name for lang='xx'"
@@ -401,7 +401,7 @@ def test_extensibility_renderers_use_xx_ui_strings(monkeypatch):
         grade="B",
         score_min=70,
         score_max=84,
-        dimensions={"volume": DimensionResult(name="volume", value=1, band="Low", points=0, evidence_refs=["PR#1"])},
+        dimensions={"volume": DimensionResult(name="volume", value=1, band="Low", evidence_refs=["PR#1"])},
     )
     rating_grade = RatingGradeResult(score=75, grade="B", reasoning=[{"text": "ok", "evidence_refs": ["PR#1"]}])
     out = render_rating(_PORTFOLIO, profile_result, rating_grade, lang="xx")
@@ -598,11 +598,9 @@ def test_structural_no_english_leak_rating():
         score_min=70,
         score_max=84,
         dimensions={
-            "volume": DimensionResult(name="volume", value=3, band="Low", points=0, evidence_refs=["owner/repo#1"]),
-            "breadth": DimensionResult(name="breadth", value=12, band="Moderate", points=1, evidence_refs=[]),
-            "stack_diversity": DimensionResult(
-                name="stack_diversity", value=5, band="Polyglot", points=2, evidence_refs=[]
-            ),
+            "volume": DimensionResult(name="volume", value=3, band="Low", evidence_refs=["owner/repo#1"]),
+            "breadth": DimensionResult(name="breadth", value=12, band="Moderate", evidence_refs=[]),
+            "stack_diversity": DimensionResult(name="stack_diversity", value=5, band="Polyglot", evidence_refs=[]),
         },
     )
     grade_result = GradeResult(
@@ -635,16 +633,16 @@ def test_dimension_band_tables_complete():
     non-empty entry in each language's dimension_names / band_labels table, so no
     untranslated English heading or band label can leak into a localized render.
     """
-    from rating.profile import _BREADTH_BANDS, _DIVERSITY_BANDS, _VOLUME_BANDS
+    from rating.profile import _BREADTH_BANDS, _DIVERSITY_BANDS, _SCALE_BANDS, _VOLUME_BANDS
 
-    expected_dims = {"volume", "breadth", "stack_diversity"}
-    expected_bands = {b[0] for b in (*_VOLUME_BANDS, *_BREADTH_BANDS, *_DIVERSITY_BANDS)}
+    expected_dims = {"volume", "breadth", "stack_diversity", "scale"}
+    expected_bands = {b[0] for b in (*_VOLUME_BANDS, *_BREADTH_BANDS, *_DIVERSITY_BANDS, *_SCALE_BANDS)}
     for lang in ("en", "ko"):
         dimension_names = LANGS[lang]["dimension_names"]
         band_labels = LANGS[lang]["band_labels"]
         for dim_key in expected_dims:
-            assert dim_key in dimension_names and dimension_names[dim_key], (
-                f"{lang} dimension_names missing {dim_key!r}"
-            )
+            assert (
+                dim_key in dimension_names and dimension_names[dim_key]
+            ), f"{lang} dimension_names missing {dim_key!r}"
         for band in expected_bands:
             assert band in band_labels and band_labels[band], f"{lang} band_labels missing {band!r}"

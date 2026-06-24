@@ -23,7 +23,7 @@ from resume.cli import run  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-def _fake_extractor(*, repo: str, author: str) -> list[Evidence]:
+def _fake_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
     """Returns canned Evidence for a github source; no network."""
     return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
 
@@ -236,9 +236,9 @@ def test_missing_jd_exits_nonzero(tmp_path, capsys):
 
 
 def test_non_github_source_rejected_without_extracting(tmp_path, capsys):
-    """'An unparseable / unsupported --source URL (e.g. https://gitlab.com/owner/repo
-    for --source-type github) causes a non-zero exit with a stderr error and never
-    invokes the injected extractor.'"""
+    """'An unparseable / malformed --source URL (e.g. https://github.com/owner —
+    missing repo — for --source-type github) causes a non-zero exit with a stderr
+    error and never invokes the injected extractor.'"""
     jd_path = _make_jd(tmp_path, "python backend")
     calls: list[dict] = []
 
@@ -247,7 +247,7 @@ def test_non_github_source_rejected_without_extracting(tmp_path, capsys):
         return []
 
     code = run(
-        ["--source-type", "github", "--source", "https://gitlab.com/owner/repo", "--author", "alice", "--jd", jd_path],
+        ["--source-type", "github", "--source", "https://github.com/owner", "--author", "alice", "--jd", jd_path],
         extractor=recording_extractor,
         runner=_fake_runner,
     )
@@ -349,7 +349,7 @@ def test_evidence_ref_markdown_injection_escaped(tmp_path, capsys):
 
     injected_ref = "PR#1](_bad_)"  # would close a Markdown link if not escaped
 
-    def extractor_with_tricky_ref(*, repo: str, author: str) -> list[Evidence]:
+    def extractor_with_tricky_ref(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
         return [Evidence(kind="pr", ref=injected_ref, url="https://github.com/o/r/pull/1", detail="Tricky ref")]
 
     def runner_citing_tricky_ref(_prompt: str) -> str:

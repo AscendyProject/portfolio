@@ -82,6 +82,16 @@ Run `python -m portfolio --source-type github --source <url> --author <handle>` 
 `--source-type web`) to render a grounded portfolio as Markdown. The `/portfolio`
 slash command is the interactive front door.
 
+`--source-type github` also accepts a **GitHub Enterprise Server** URL (e.g.
+`https://ghe.example.com/<owner>/<repo>`): the host is passed through to `gh`, so
+you must be logged into that host (`gh auth login --hostname ghe.example.com`).
+Pointing `--source-type web` at a code-host repo URL is **not** a substitute — it
+scrapes the page as an article and grounds nothing.
+
+`--limit N` (default 100) caps how many merged PRs the `github` / `github-author`
+sources pull. Raise it for a prolific author whose evidence is truncated at 100
+(e.g. `--limit 300`); the trade-off is more `gh` calls, so it runs slower.
+
 The rendered document leads with a grounded headline blockquote (model-authored, or a
 deterministic fallback when grounding fails), followed by a stats line showing merged-PR
 count, distinct repo count, and the detected language stack. When the model returns
@@ -177,11 +187,29 @@ a file instead of stdout.
 
 Run `python -m rating --source-type <type> --source <url> --author <handle>` to produce
 a grounded **capability assessment** — a deterministic grade (S/A/B/C/D) and rubric score
-(0–100) — from the developer's real evidence. The grade is computed deterministically from
-evidence-derived metrics (volume of merged PRs, breadth of changed files, stack diversity)
-and locks a score band; a temperature-0 agent grader then picks the precise score within
-that band and writes grounding-checked reasoning. Every metric cites the exact evidence
-refs it was computed from; un-grounded reasoning is dropped. **This command does NOT
+(0–100, shown to one decimal) — from the developer's real evidence. The score is a single
+deterministic, continuous function of the evidence-derived metrics (volume of merged PRs,
+breadth of changed files, stack diversity, and change scale): each is mapped through a
+piecewise curve toward absolute, product-defined anchors and weighted. The **grade is the
+band that score falls in** (`S=96–100`, `A=85–95`, `B=70–84`, `C=55–69`, `D=0–54`), and it
+carries a `+`/flat/`-` suffix (e.g. `B+`, `B`, `B-`) from the score's position within the
+band. Because the curves keep large values separated, two strong developers who differ in
+(say) volume get different scores instead of clustering. A **substance cap** (a trivial
+median change size can't reach a top grade on raw volume/breadth alone) and an **S guard**
+(reserved for genuinely all-around-substantial work) keep the top honest and S rare. A
+temperature-0 agent writes only the grounding-checked reasoning; it changes neither the
+grade nor the score. Stack
+diversity counts distinct *programming* languages only — config/data/markup/documentation files
+(YAML, JSON, Markdown, HTML, CSS) and files with an unmapped extension (`.toml`, `.ini`,
+`Dockerfile`, …, which collapse to a single "other" bucket) are excluded so a repo's
+ubiquitous config/CI/manifest files don't inflate the count. Change scale is the median changed lines (additions +
+deletions) per PR over **code files only** — generated, vendored, lockfile, and
+config/doc files are excluded so a reformat or regenerated lockfile can't inflate it. Every metric cites the exact evidence
+refs it was computed from; un-grounded reasoning is dropped. The report also includes a
+deterministic **How to Improve** section that, per dimension, shows either that it is maxed
+or the next band and the exact raw delta needed to reach it (e.g. `Volume: Steady → High
+(≥20, +12)`) — rubric arithmetic over the developer's own metrics, never a population
+comparison. **This command does NOT
 produce an absolute percentile, global comparison, or any claim about the developer's
 standing relative to a population.** The `/rating` slash command is the interactive front
 door; `--out <file>` writes to a file instead of stdout.
