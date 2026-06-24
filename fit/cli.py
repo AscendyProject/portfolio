@@ -18,7 +18,7 @@ from pathlib import Path
 
 import portfolio.i18n as i18n
 from fit.grade import GraderRunner, bounded_grade, default_grader_runner
-from fit.render import render_fit
+from fit.render import render_fit, render_fit_batch
 from fit.score import score_fit
 from portfolio.extract import extract_merged_prs
 from portfolio.i18n import detect_language
@@ -41,7 +41,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="source URL (a GitHub repo URL, or an article URL for --source-type web)",
     )
     parser.add_argument("--author", help="GitHub handle or subject name")
-    parser.add_argument("--jd", required=True, help="path to the job description file (plain text)")
+    parser.add_argument("--jd", default=None, help="path or http(s) URL to the job description file (plain text)")
+    parser.add_argument(
+        "--jd-dir",
+        default=None,
+        help="directory of JD files (*.txt, *.md) to score in batch; mutually exclusive with --jd",
+    )
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
     parser.add_argument(
         "--mask-private", action="store_true", default=False, help="anonymize private GitHub repo names in output"
@@ -75,6 +80,21 @@ def run(
     except SystemExit as exc:
         return int(exc.code) if exc.code is not None else 2
 
+    # Mutual-exclusion and required check for --jd / --jd-dir.
+    if args.jd is not None and args.jd_dir is not None:
+        print("--jd and --jd-dir are mutually exclusive; supply exactly one", file=sys.stderr)
+        return 2
+    if args.jd is None and args.jd_dir is None:
+        print("one of --jd or --jd-dir is required", file=sys.stderr)
+        return 2
+
+    # ── Batch mode (--jd-dir) ─────────────────────────────────────────────────
+    if args.jd_dir is not None:
+        return _run_batch(
+            args, extractor=extractor, runner=runner, fetcher=fetcher, visibility_lookup=visibility_lookup
+        )
+
+    # ── Single-JD mode (--jd) — original path, byte-identical output ─────────
     # Load the JD (file path or http(s) URL) — fail early with a clean error.
     try:
         jd_text = load_jd(args.jd, fetcher=fetcher)
@@ -156,6 +176,105 @@ def run(
         f"needs-confirmation: {len(grounding.needs_confirmation)}",
         file=sys.stderr,
     )
+
+    if args.out:
+        try:
+            Path(args.out).write_text(markdown, encoding="utf-8")
+        except OSError as exc:
+            print(f"failed to write --out file {args.out!r}: {exc}", file=sys.stderr)
+            return 1
+    else:
+        emit_markdown(markdown)
+    return 0
+
+
+def _run_batch(
+    args,
+    *,
+    extractor,
+    runner,
+    fetcher,
+    visibility_lookup,
+) -> int:
+    """Execute batch mode: score the portfolio against every JD in --jd-dir."""
+    jd_dir = Path(args.jd_dir)
+
+    # Collect matching files non-recursively; accepted suffixes are .txt and .md (case-sensitive).
+    _ACCEPTED_SUFFIXES = {".txt", ".md"}
+    try:
+        entries = list(jd_dir.iterdir())
+    except OSError:
+        entries = []
+
+    jd_files = sorted(
+        [p for p in entries if p.is_file() and p.suffix in _ACCEPTED_SUFFIXES],
+        key=lambda p: p.name,
+    )
+
+    if not jd_files:
+        print(f"--jd-dir {args.jd_dir!r}: no matching JD files (*.txt, *.md) found", file=sys.stderr)
+        return 2
+
+    # Language: explicit --lang wins; batch mode defaults to "en" (no auto-detect from JD).
+    lang = args.lang if args.lang is not None else "en"
+
+    # Resolve the source (validation/parse only — no extraction yet).
+    try:
+        resolved = resolve_source(
+            args.source_type,
+            SourceRequest(source=args.source, author=args.author, extractor=extractor, fetcher=fetcher),
+        )
+    except UnsupportedSourceError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(f"invalid source: {exc}", file=sys.stderr)
+        return 2
+
+    # Build the portfolio ONCE.
+    try:
+        result, n_masked = resolve_and_optionally_mask(
+            resolved,
+            subject=resolved.subject,
+            runner=runner,
+            mask_private=args.mask_private,
+            synthesis_runner=None,
+            visibility_lookup=visibility_lookup,
+            lang=lang,
+        )
+    except Exception as exc:
+        print(f"failed to build portfolio: {exc}", file=sys.stderr)
+        return 1
+
+    if args.mask_private:
+        print(f"masked {n_masked} private repo(s)", file=sys.stderr)
+
+    portfolio = result.portfolio
+
+    # Score per JD; collect (basename, ScoreResult) pairs.
+    batch_results: list[tuple[str, object]] = []
+    for jd_path in jd_files:
+        try:
+            jd_text = jd_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"cannot read JD file {jd_path!r}: {exc}", file=sys.stderr)
+            return 1
+        except UnicodeError as exc:
+            print(f"cannot decode JD file {jd_path!r}: {exc}", file=sys.stderr)
+            return 1
+        score_result = score_fit(portfolio, jd_text)
+        batch_results.append((jd_path.name, score_result))
+
+    # Grounding summary → stderr, exactly once.
+    grounding = result.grounding
+    print(
+        f"grounded: {len(grounding.grounded)}  "
+        f"rejected: {len(grounding.rejected)}  "
+        f"needs-confirmation: {len(grounding.needs_confirmation)}",
+        file=sys.stderr,
+    )
+
+    markdown = render_fit_batch(batch_results, lang=lang)
 
     if args.out:
         try:

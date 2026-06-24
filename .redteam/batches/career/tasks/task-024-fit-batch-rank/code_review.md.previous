@@ -1,0 +1,50 @@
+## redteam adversarial review (codex · agent-pair)
+Reviewed `git diff main...HEAD` against project hard rules, security checklist, and task artifacts: `outcome.md`, `plan_review.md`, `impl_diff.patch`, `verification.log`, and `state.json`.
+
+---
+
+IR-001 severity:major status:open
+
+Batch mode breaks `--source-type web`. `fit/cli.py:222` constructs `SourceRequest(..., fetcher=None)`, so web extraction later calls `None(url)` and exits 1. Pass the injected `fetcher` through `_run_batch`, matching single-JD behavior, and add a batch web-source test.
+
+IR-002 severity:major status:open
+
+Matching JD files are read at `fit/cli.py:254` without handling `OSError` or `UnicodeError`. An unreadable or invalid-UTF-8 file raises an uncaught exception after the expensive portfolio build. Return a clean nonzero error without a traceback and test both cases.
+
+IR-003 severity:major status:open
+
+Two new tests violate the required pre-change-failure rule:
+
+- `test_single_jd_golden` reproduces existing base behavior and therefore passes against the pre-change code.
+- `test_single_jd_lang_autodetect_korean` tests already-existing auto-detection and also passes pre-change.
+
+These need a justified exception in the approved review contract or replacement with regression checks that can be demonstrated to fail pre-change. Under the current review rules they are major findings.
+
+IR-004 severity:major status:open
+
+`test_jd_dir_tiebreak_by_basename` does not exercise all three sorting tiers as required. It checks different scores and filename ordering, but never supplies equal midpoint scores with differing coverage values. A renderer that ignored the secondary coverage key would still pass.
+
+IR-005 severity:major status:open
+
+The diff contains unrelated modifications to another task’s harness artifacts:
+
+- `.redteam/batches/career/tasks/task-023-fit-score-quality/progress.md`
+- `.redteam/batches/career/tasks/task-023-fit-score-quality/state.json`
+
+These are outside task-024 scope and explicitly protected by the operating guide. Remove them from the task-024 diff through branch/commit cleanup.
+
+### New-test justification
+
+All batch CLI, renderer, escaping, ranking, i18n-key, output-file, build-once, grounding-isolation, and deterministic-output tests would fail pre-change because `--jd-dir`, `render_fit_batch`, `_escape_cell`, and batch i18n keys did not exist.
+
+Exceptions:
+
+- `test_single_jd_golden`: would pass pre-change.
+- `test_single_jd_lang_autodetect_korean`: would pass pre-change.
+- `test_jd_dir_tiebreak_by_basename`: fails pre-change due the missing renderer, but does not satisfy its stated three-tier coverage requirement.
+
+### Verification
+
+`verification.log` exists, reports `703 passed, 1 skipped`, and `state.verification.last_exit_code` is `0`. No grounding-gate weakening, score/rubric changes, dependency additions, shell interpolation, or edits to `portfolio/render.py` were found.
+
+REVIEW_DECISION: CHANGES_REQUESTED
