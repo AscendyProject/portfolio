@@ -333,15 +333,27 @@ python -m reference_check --source-type github-author --author <handle> --mask-p
 
 When `--mask-private` is set:
 
-1. The full extract → narrate → ground pipeline runs first (no synthesis yet).
-2. Every `owner/repo` found in structured evidence fields (`ref`, `url`) and claim
+1. Evidence is extracted first and the masking guard (`assert_maskable`) runs
+   **before any model call**. If the evidence contains a non-github.com host — in
+   either `ev.url` or the host label encoded in `ev.ref` (e.g. a GHES ref like
+   `ghe.example.com/owner/repo#1`) — the run is refused immediately with a clear
+   error, and the model is never invoked. This guarantees that no private GHES
+   evidence is ever sent to the model (IR-001).
+2. The narrate → ground pipeline then runs on the already-checked evidence.
+3. Every `owner/repo` found in structured evidence fields (`ref`, `url`) and claim
    `evidence_refs` is looked up via `gh repo view --json isPrivate`.
-3. Private repos are relabeled `private-repo-1`, `private-repo-2`, … (sorted by name
+4. Private repos are relabeled `private-repo-1`, `private-repo-2`, … (sorted by name
    for determinism). Every occurrence in `ref`, `url`, `detail`, `context`, `claim.text`,
    and `claim.evidence_refs` is rewritten using the same map.
-4. Synthesis (if enabled) runs on the already-masked portfolio; the model's output text is
+5. Synthesis (if enabled) runs on the already-masked portfolio; the model's output text is
    scrubbed again after synthesis so any private name the model emitted on its own is removed.
-5. A summary line `masked N private repo(s)` is printed to stderr.
+6. A summary line `masked N private repo(s)` is printed to stderr.
+
+**Fail-closed guard:** the guard inspects both `ev.url` (URL-based host) and `ev.ref`
+(ref-encoded host label). Evidence with an empty `url` but a GHES-style ref
+(`ghe.host.com/owner/repo#n`) is refused just like evidence with a GHES URL — there
+is no ref-based bypass. Only `article` evidence (public web content with no GitHub repo
+to mask) is exempt from this check.
 
 **Scope limit:** only literal `owner/repo` substrings are masked — detected from structured
 fields only (`evidence.ref`, `evidence.url`, `claim.evidence_refs`). Semantic project names

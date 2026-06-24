@@ -1298,3 +1298,91 @@ def test_rating_cli_mask_private_fails_closed_on_ghes(tmp_path, capsys):
     assert code != 0  # refused, not a silent "masked 0"
     assert "ghe.example.com" in captured.err  # clear reason on stderr
     assert "acme/secret" not in captured.out  # never emitted unmasked
+
+
+# ---------------------------------------------------------------------------
+# IR-001: assert_maskable runs BEFORE any model call (counting runner proof)
+# ---------------------------------------------------------------------------
+
+
+def test_mask_private_runner_not_called_when_assert_maskable_raises():
+    """When assert_maskable raises on the mask_private=True path, neither runner
+    nor synthesis_runner is ever called — proven by counting fakes.
+    Call-count must be 0 for both (IR-001 ordering guarantee)."""
+    from portfolio.pipeline import resolve_and_optionally_mask
+    from portfolio.sources import ResolvedSource
+
+    runner_calls = [0]
+    synthesis_runner_calls = [0]
+
+    def counting_runner(prompt: str) -> str:
+        runner_calls[0] += 1
+        return "[]"
+
+    def counting_synthesis_runner(prompt: str) -> str:
+        synthesis_runner_calls[0] += 1
+        return "{}"
+
+    def fake_extract():
+        # Evidence with a GHES URL — assert_maskable must refuse this
+        return [Evidence(kind="pr", ref="PR#1", url="https://ghe.example.com/owner/repo/pull/1")]
+
+    resolved = ResolvedSource(subject="alice", extract=fake_extract)
+
+    with pytest.raises(MaskingError):
+        resolve_and_optionally_mask(
+            resolved,
+            subject="alice",
+            runner=counting_runner,
+            mask_private=True,
+            synthesis_runner=counting_synthesis_runner,
+        )
+
+    assert runner_calls[0] == 0, "runner was called before the masking guard raised (IR-001)"
+    assert synthesis_runner_calls[0] == 0, "synthesis_runner was called before the masking guard raised (IR-001)"
+
+
+# ---------------------------------------------------------------------------
+# IR-003: assert_maskable checks ref-encoded host (url-less GHES refs)
+# ---------------------------------------------------------------------------
+
+
+def test_assert_maskable_raises_for_ghes_ref_without_url():
+    """A GHES-style ref (host/owner/repo#n) with empty url still trips the
+    masking guard (IR-003: url-less GHES ref bypass is closed)."""
+    p = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="ghe.example.com/owner/repo#1", url="")],
+        claims=[],
+    )
+    with pytest.raises(MaskingError, match="ghe.example.com"):
+        assert_maskable(p)
+
+
+def test_assert_maskable_allows_bare_owner_repo_ref_without_url():
+    """A bare owner/repo#n ref with empty url is github.com-origin and must NOT
+    trip the guard (two-segment prefix → no host label)."""
+    p = Portfolio(
+        subject="alice",
+        evidence=[Evidence(kind="pr", ref="owner/repo#1", url="")],
+        claims=[],
+    )
+    assert_maskable(p)  # must not raise
+
+
+def test_assert_maskable_allows_article_with_non_github_ref():
+    """article evidence whose ref is a non-github.com URL must NOT trip the guard
+    (web-article exemption is preserved even for the new ref-host check)."""
+    p = Portfolio(
+        subject="alice",
+        evidence=[
+            Evidence(
+                kind="article",
+                ref="blog.example.com/owner/repo#post",
+                url="https://blog.example.com/owner/repo/post",
+                detail="Some post",
+            )
+        ],
+        claims=[],
+    )
+    assert_maskable(p)  # must not raise — article is public content, not a repo
