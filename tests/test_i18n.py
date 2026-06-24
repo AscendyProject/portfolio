@@ -641,8 +641,8 @@ def test_dimension_band_tables_complete():
         dimension_names = LANGS[lang]["dimension_names"]
         band_labels = LANGS[lang]["band_labels"]
         for dim_key in expected_dims:
-            assert (
-                dim_key in dimension_names and dimension_names[dim_key]
-            ), f"{lang} dimension_names missing {dim_key!r}"
+            assert dim_key in dimension_names and dimension_names[dim_key], (
+                f"{lang} dimension_names missing {dim_key!r}"
+            )
         for band in expected_bands:
             assert band in band_labels and band_labels[band], f"{lang} band_labels missing {band!r}"

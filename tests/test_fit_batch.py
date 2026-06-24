@@ -24,7 +24,7 @@ from portfolio.i18n import LANGS  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-def _fake_extractor(*, repo: str, author: str) -> list[Evidence]:
+def _fake_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
     return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
 
 
@@ -330,7 +330,7 @@ def test_build_once_extractor_called_once(tmp_path, capsys):
 
     extractor_calls: list = []
 
-    def counting_extractor(*, repo: str, author: str) -> list[Evidence]:
+    def counting_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
         extractor_calls.append((repo, author))
         return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
 
@@ -364,7 +364,7 @@ def test_build_once_extractor_called_once(tmp_path, capsys):
     jd_path.write_text("python backend", encoding="utf-8")
     single_extractor_calls: list = []
 
-    def single_counting_extractor(*, repo: str, author: str) -> list[Evidence]:
+    def single_counting_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
         single_extractor_calls.append((repo, author))
         return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
 
