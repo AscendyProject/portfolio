@@ -13,7 +13,9 @@ type that raises `UnsupportedSourceError`.
 
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -92,8 +94,40 @@ def parse_github_source(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError(f"expected an http(s) URL, got {url!r}")
-    host = parsed.hostname  # lowercased, port/userinfo stripped
-    if not host or not _HOST_RE.match(host):
+    # Reject userinfo (e.g. user@host or github.com@evil.example — authority spoofing)
+    if parsed.username is not None:
+        raise ValueError(f"userinfo in URL authority is not allowed: {url!r}")
+    # Reject explicit port — inspect raw netloc directly because urlparse(...).port
+    # is None for an empty ":" and raises ValueError for malformed ":abc"/":99999".
+    netloc = parsed.netloc
+    # Strip IPv6 brackets so "[::1]" → "" and "[::1]:port" → ":port"
+    if netloc.startswith("["):
+        close = netloc.find("]")
+        if close >= 0:
+            netloc = netloc[close + 1 :]
+    if ":" in netloc:
+        raise ValueError(f"explicit port is not allowed in {url!r}")
+    host = parsed.hostname  # lowercased, brackets/port/userinfo stripped by urlparse
+    if not host:
+        raise ValueError(f"invalid or missing host in {url!r}")
+    # Reject canonical IP-literal hosts (127.0.0.1, ::1 after bracket-strip, etc.)
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        raise ValueError(f"IP-literal hosts are not allowed in {url!r}")
+    # Reject legacy and mixed-base IPv4 forms that socket.inet_aton accepts but
+    # ipaddress does not (127.1, 0177.0.0.1, 0x7f.0.0.1, 127.0x1, 127.0x0.1, …)
+    # inet_aton mirrors the C resolver's full IPv4 grammar (decimal/octal/hex parts,
+    # 1-/2-/3-/4-part forms, and any mix), so it rejects real DNS names with OSError.
+    try:
+        socket.inet_aton(host)
+    except OSError:
+        pass
+    else:
+        raise ValueError(f"IP-literal hosts are not allowed in {url!r}")
+    if not _HOST_RE.match(host):
         raise ValueError(f"invalid or missing host in {url!r}")
     if parsed.query or parsed.fragment:
         raise ValueError(f"unexpected query/fragment in {url!r}")

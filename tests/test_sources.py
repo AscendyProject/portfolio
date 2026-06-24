@@ -331,3 +331,80 @@ def test_github_author_valid_handles_accepted(author):
         SourceRequest(source=None, author=author, author_extractor=author_extractor),
     )
     assert resolved.subject == author
+
+
+# ---------------------------------------------------------------------------
+# SSRF hardening: IP-literal, legacy IPv4, userinfo, port rejections (IR-002 / IR-005)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # Canonical IPv4 literals (ipaddress.ip_address detects these)
+        "https://127.0.0.1/owner/repo",  # loopback
+        "https://169.254.169.254/owner/repo",  # link-local / cloud metadata
+        "https://10.0.0.1/owner/repo",  # RFC1918 private
+        "https://8.8.8.8/owner/repo",  # public IP (GHES is always DNS-named)
+        # Legacy / short-form IPv4 (socket.inet_aton detects, ipaddress does not)
+        "https://127.1/owner/repo",  # 2-part decimal
+        "https://0177.0.0.1/owner/repo",  # octal first octet
+        "https://0x7f.0.0.1/owner/repo",  # hex first octet
+        "https://2130706433/owner/repo",  # 32-bit integer (also single-label)
+        # Mixed-base IPv4 (PR-001: rightmost-label-has-a-letter heuristic missed these)
+        "https://127.0x1/owner/repo",  # decimal + final hex
+        "https://127.0.0x1/owner/repo",  # decimal.decimal.hex (3-part)
+        "https://0x7f.0.0x1/owner/repo",  # hex first + hex final
+        "https://0177.0.0x1/owner/repo",  # octal first + hex final
+        "https://127.0x0.1/owner/repo",  # middle-label hex, numeric final
+        # IPv6 literals (ipaddress.ip_address on bracket-stripped hostname)
+        "https://[::1]/owner/repo",  # loopback
+        "https://[fe80::1]/owner/repo",  # link-local
+    ],
+)
+def test_parse_github_source_rejects_ip_literals(url):
+    """IP-literal hosts in any notation (canonical, legacy, mixed-base, IPv6) are
+    rejected with a single-line ValueError before any gh invocation (IR-002)."""
+    with pytest.raises(ValueError) as exc_info:
+        parse_github_source(url)
+    assert "\n" not in str(exc_info.value), "error message must be single-line (no traceback leak)"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # Userinfo / authority spoofing (IR-005)
+        "https://github.com@evil.example/owner/repo",  # spoofy userinfo mimics github.com
+        "https://user@ghe.example.com/owner/repo",  # any userinfo on a GHES host
+        # Explicit port — numeric, empty, nonnumeric, out-of-range (PR-002)
+        "https://ghe.example.com:8443/owner/repo",  # numeric port on GHES
+        "https://github.com:443/owner/repo",  # numeric port even on github.com
+        "https://ghe.example.com:/owner/repo",  # empty port (parsed.port is None)
+        "https://ghe.example.com:abc/owner/repo",  # nonnumeric (parsed.port raises)
+        "https://ghe.example.com:99999/owner/repo",  # out-of-range (parsed.port raises)
+        # Single-label host (explicit pin — already in existing rejects table)
+        "https://localhost/owner/repo",
+    ],
+)
+def test_parse_github_source_rejects_authority_issues(url):
+    """Userinfo, explicit ports (numeric/empty/malformed), and single-label hosts are
+    rejected with a single-line ValueError before any gh invocation (IR-005, PR-002)."""
+    with pytest.raises(ValueError) as exc_info:
+        parse_github_source(url)
+    assert "\n" not in str(exc_info.value), "error message must be single-line (no traceback leak)"
+
+
+def test_ssrf_ip_literal_rejected_before_extractor_called():
+    """An SSRF URL with an IP-literal host is rejected by resolve_source BEFORE the
+    extractor is ever invoked — parallels test_bad_github_url_raises_before_extraction."""
+    extractor, calls = _recording_extractor()
+    with pytest.raises(ValueError):
+        resolve_source(
+            "github",
+            SourceRequest(
+                source="https://127.0.0.1/owner/repo",
+                author="alice",
+                extractor=extractor,
+            ),
+        )
+    assert calls == [], "extractor must not be called for a rejected SSRF URL"
