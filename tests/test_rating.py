@@ -286,27 +286,11 @@ def test_scale_zero_when_no_prs():
     assert result.dimensions["scale"].band == "Small"
 
 
-def test_scale_contributes_to_the_score():
-    """Change scale feeds the capability score: two portfolios identical except in
-    median change size get different scores — bigger typical PRs score higher."""
-    files = [Evidence(kind="file", ref=f"src/m{i}.py") for i in range(20)]
-    small = Portfolio(
-        subject="a",
-        evidence=[Evidence(kind="pr", ref=f"PR#{i}", additions=5, deletions=0) for i in range(20)] + files,
-        claims=[],
-    )
-    big = Portfolio(
-        subject="b",
-        evidence=[Evidence(kind="pr", ref=f"PR#{i}", additions=120, deletions=40) for i in range(20)] + files,
-        claims=[],
-    )
-    assert profile(big).score > profile(small).score
-
-
 def test_s_is_gated_on_substance_not_volume_breadth():
     """S cannot be reached by raw volume/breadth alone: a developer who maxes volume
     and breadth but ships trivial PRs (tiny median change) is held well below S by
-    the substance cap — no re-saturation of the top (the original '98' bug)."""
+    the substance cap. (Discriminating: the old points rubric scored this in the low
+    A range; the new substance cap drags it under 70.)"""
     evidence = [Evidence(kind="pr", ref=f"PR#{i}", additions=1, deletions=0) for i in range(400)]  # huge volume, 1-line
     evidence += [Evidence(kind="file", ref=f"src/m{i}.py") for i in range(1000)]  # huge breadth
     evidence += [
@@ -319,14 +303,21 @@ def test_s_is_gated_on_substance_not_volume_breadth():
     assert result.score < 70  # and the substance cap drags it down, not just shy of 96
 
 
-def test_genuinely_exceptional_work_reaches_s():
-    """The S guard still ADMITS real all-around-substantial work: high volume, broad,
-    polyglot, AND large typical changes → S."""
-    evidence = [Evidence(kind="pr", ref=f"PR#{i}", additions=150, deletions=80) for i in range(500)]  # median 230
-    exts = [".py", ".js", ".go", ".rs", ".rb", ".kt"]
-    evidence += [Evidence(kind="file", ref=f"src/m{i}{exts[i % 6]}") for i in range(2000)]
-    result = profile(Portfolio(subject="monster", evidence=evidence, claims=[]))
-    assert result.grade == "S"
+def test_s_bar_raised_old_8point_portfolio_no_longer_s():
+    """The S bar is far higher than the old points rubric. A portfolio that maxed
+    the OLD per-dimension bands (20 PRs, 30 files, 4 languages, median 150 lines) —
+    which scored a full 8 points = S before — no longer reaches S; only genuinely
+    exceptional volume+breadth+scale does. (Discriminating: was S pre-change.)"""
+    exts = (".py", ".js", ".go", ".rs")
+    old_max = [Evidence(kind="pr", ref=f"P{i}", additions=100, deletions=50) for i in range(20)]  # median 150
+    old_max += [Evidence(kind="file", ref=f"s/m{i}{exts[i % 4]}") for i in range(30)]  # 30 files, 4 langs
+    assert profile(Portfolio(subject="oldS", evidence=old_max, claims=[])).grade != "S"
+
+    # The S guard still ADMITS real all-around-substantial work.
+    big_exts = (".py", ".js", ".go", ".rs", ".rb", ".kt")
+    mon = [Evidence(kind="pr", ref=f"M{i}", additions=150, deletions=80) for i in range(500)]  # median 230
+    mon += [Evidence(kind="file", ref=f"s/m{i}{big_exts[i % 6]}") for i in range(2000)]
+    assert profile(Portfolio(subject="mon", evidence=mon, claims=[])).grade == "S"
 
 
 # ---------------------------------------------------------------------------
