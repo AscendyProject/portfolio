@@ -1,7 +1,7 @@
 {
   "name": "portfolio",
   "description": "Grounded portfolio/resume/reference/fit/rating from a developer's real GitHub work — every claim traced to evidence, never invented.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": { "name": "AscendyProject" },
   "homepage": "https://github.com/AscendyProject/portfolio",
   "repository": "https://github.com/AscendyProject/portfolio",

@@ -6,36 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
-- **Rating stack diversity no longer counts the "other" bucket** — files with an
-  unmapped extension (`.toml`, `.ini`, `.lock`, `Dockerfile`, `Makefile`, and any
-  truly-unknown extension) collapsed to the single literal `other` language, which
-  let config/build/junk files inflate the diversity dimension for free. They are
-  now excluded from the count (we do not credit what we cannot name); `language_for_ref`
-  still reports `other` for display. Complements the earlier markup/doc exclusion (#48).
+## [0.4.0] — 2026-06-24
+
+Wider reach and a de-saturated rating: evaluate GitHub Enterprise Server repos,
+and a rating that actually discriminates — config/doc files no longer inflate the
+score, change size counts, and the score is a deterministic, metric-driven number
+instead of everyone landing on 98.
 
 ### Added
-- **Rating "How to Improve" section** — the scorecard now explains, per dimension,
-  why the score is what it is and what would raise it: each dimension is either
-  marked maxed or shows the next band and the exact raw delta needed (e.g.
-  `Volume: Steady → High (≥20, +12)`). Deterministic rubric arithmetic over the
-  developer's own metrics — no model, no population comparison (localized en/ko)
-  (#55).
-- **Rating sub-tier suffix** — each letter grade now carries a `+`/flat/`-` suffix
-  (e.g. `B+`, `B`, `B-`) from the deterministic score's position within its band
-  (top third → `+`, middle → flat, bottom → `-`). Refines the grade without
-  changing it, so two same-grade developers are visibly ordered (#48).
-
-### Changed
-- **Rating score is now deterministic and continuous** — the precise 0–100 score
-  within the locked grade band is computed as a continuous function of the
-  dimension metrics (each normalized against a pinned ceiling, interpolated within
-  the band), instead of being picked by the agent. Two developers in the same band
-  now get different, metric-driven scores rather than clustering on the band
-  midpoint (the "everyone gets 98" problem). The agent is consulted only for the
-  grounding-checked reasoning and can change neither the grade nor the score (#48).
-
-### Added
+- **GitHub Enterprise Server support** — `--source-type github` now accepts a
+  GHES repo URL (e.g. `https://ghe.example.com/<owner>/<repo>`); the host is
+  passed through to `gh` as `[HOST/]OWNER/REPO` so the call routes to that server
+  (requires `gh auth login --hostname <host>`). github.com URLs are unchanged
+  (#45).
 - **Rating change-scale dimension** — the rating now scores the **median changed
   lines (additions + deletions) per PR**, counting code files only (generated,
   vendored, lockfile, and config/doc files excluded so a reformat or regenerated
@@ -45,21 +28,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   re-tuned points→grade table, so **S requires substantial typical change size in
   addition to volume/breadth/diversity** — it is no longer reachable on PR/file/
   language counts alone (#50, toward de-saturating the rating, #48).
+- **Rating sub-tier suffix** — each letter grade now carries a `+`/flat/`-` suffix
+  (e.g. `B+`, `B`, `B-`) from the deterministic score's position within its band
+  (top third → `+`, middle → flat, bottom → `-`). Refines the grade without
+  changing it, so two same-grade developers are visibly ordered (#48).
+- **Rating "How to Improve" section** — the scorecard now explains, per dimension,
+  why the score is what it is and what would raise it: each dimension is either
+  marked maxed or shows the next band and the exact raw delta needed (e.g.
+  `Volume: Steady → High (≥20, +12)`). Deterministic rubric arithmetic over the
+  developer's own metrics — no model, no population comparison (localized en/ko)
+  (#55).
 
 ### Changed
 - **Rating stack diversity counts programming languages only** — config, data,
   markup, and documentation files (YAML, JSON, Markdown, HTML, CSS) no longer
   count as distinct "languages", so a repo's ubiquitous README/CI/manifest files
   can't inflate the diversity dimension (and thus the grade). Real code languages
-  (Python, Go, SQL, Shell, …) are unchanged. First step toward de-saturating the
-  rating, which currently maxes out at S for most active developers.
-
-### Added
-- **GitHub Enterprise Server support** — `--source-type github` now accepts a
-  GHES repo URL (e.g. `https://ghe.example.com/<owner>/<repo>`); the host is
-  passed through to `gh` as `[HOST/]OWNER/REPO` so the call routes to that server
-  (requires `gh auth login --hostname <host>`). github.com URLs are unchanged
-  (#45).
+  (Python, Go, SQL, Shell, …) are unchanged (#49).
+- **Rating stack diversity no longer counts the "other" bucket** — files with an
+  unmapped extension (`.toml`, `.ini`, `.lock`, `Dockerfile`, `Makefile`, and any
+  truly-unknown extension) collapsed to the single literal `other` language, which
+  let config/build/junk files inflate the diversity dimension for free. They are
+  now excluded from the count (we do not credit what we cannot name); `language_for_ref`
+  still reports `other` for display (#59).
+- **Rating score is now deterministic and continuous** — the precise 0–100 score
+  within the locked grade band is computed as a continuous function of the
+  dimension metrics (each normalized against a pinned ceiling, interpolated within
+  the band), instead of being picked by the agent. Two developers in the same band
+  now get different, metric-driven scores rather than clustering on the band
+  midpoint (the "everyone gets 98" problem). The agent is consulted only for the
+  grounding-checked reasoning and can change neither the grade nor the score (#52).
 
 ## [0.3.0] — 2026-06-21
 
@@ -116,6 +114,7 @@ anonymize private repos before sharing.
 - Dropped the `ascendy-` prefix; the harness/repo is now `portfolio` (#8).
 - Upgraded the vendored redteam harness to 0.4.0 (#21).
 
-[Unreleased]: https://github.com/AscendyProject/portfolio/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/AscendyProject/portfolio/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/AscendyProject/portfolio/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/AscendyProject/portfolio/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/AscendyProject/portfolio/releases/tag/v0.2.0
