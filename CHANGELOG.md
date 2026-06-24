@@ -20,6 +20,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with an empty `url` but a GHES-style ref (`ghe.host.com/owner/repo#n` — three or
   more segments before `#` / `:`) is refused with `MaskingError`, so there is no
   url-less bypass of the fail-closed guard. The `article` exemption is preserved.
+- **GHES host parsing hardened against IP-literal and authority-spoofing inputs**
+  (IR-002 / IR-005) — `parse_github_source` now rejects IP-literal hosts in any
+  notation (canonical IPv4, legacy short-form, octal, hex, mixed-base, and IPv6
+  literals), userinfo in the authority (`user@host`, `github.com@evil.example`),
+  and explicit ports (numeric, empty, nonnumeric, out-of-range), all with a
+  `ValueError` before any `gh` invocation. Well-formed external DNS GHES hosts and
+  all github.com URLs are unchanged. This is syntax-level hardening; a DNS name
+  that resolves to an internal IP is not blocked here.
 
 ## [0.5.0] — 2026-06-24
 

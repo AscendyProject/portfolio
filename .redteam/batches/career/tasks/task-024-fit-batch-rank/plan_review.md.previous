@@ -1,0 +1,32 @@
+## redteam adversarial plan review (codex · agent-pair)
+
+Reviewed `input.md`, `outcome.md`, `state.json`, relevant implementation/tests, and the plan-review criteria.
+
+---
+
+PR-001 severity:blocker status:resolved
+
+Batch mode defaults to English while single-JD language auto-detection remains unchanged, with concrete verification for both paths.
+
+PR-002 severity:major status:resolved
+
+The plan specifies batch-table cell escaping for pipes, line breaks, and existing Markdown metacharacters, with targeted structural tests.
+
+PR-003 severity:major status:resolved
+
+Base-branch golden stdout and stderr fixtures provide byte-for-byte single-JD compatibility verification.
+
+PR-004 severity:blocker status:resolved
+
+The global `portfolio.render._escape` boundary is now explicitly protected. Batch-specific escaping is confined to a new helper in `fit/render.py`, and `portfolio/render.py` must remain unchanged.
+
+No new findings.
+
+Verification is parseable, concrete, and limited to repository linting, formatting checks, and tests:
+
+```yaml
+commands:
+  - bash .redteam/scripts/verify.sh
+```
+
+REVIEW_DECISION: APPROVED

@@ -83,8 +83,14 @@ Run `python -m portfolio --source-type github --source <url> --author <handle>` 
 slash command is the interactive front door.
 
 `--source-type github` also accepts a **GitHub Enterprise Server** URL (e.g.
-`https://ghe.example.com/<owner>/<repo>`): the host is passed through to `gh`, so
-you must be logged into that host (`gh auth login --hostname ghe.example.com`).
+`https://ghe.example.com/<owner>/<repo>`): the host must be a plain external DNS
+name — IP-literal hosts in any notation (canonical `127.0.0.1`, legacy `127.1`,
+octal `0177.0.0.0`, hex `0x7f.0.0.1`, mixed-base `127.0x1`, and IPv6 `[::1]`),
+userinfo (`user@host`), and explicit ports (`:8443`) are all rejected with a
+`ValueError` before `gh` is invoked. The validated host is passed through to `gh`,
+so you must be logged into that host (`gh auth login --hostname ghe.example.com`).
+**Note:** this is syntax-level hardening only — a DNS name that resolves to an
+internal IP is still forwarded to `gh`; a host allowlist is the follow-up mitigation.
 Pointing `--source-type web` at a code-host repo URL is **not** a substitute — it
 scrapes the page as an article and grounds nothing.
 
@@ -161,6 +167,24 @@ local filesystem path to a plain-text file **or** an `http(s)` URL to a job post
 > NOT a holistic "you are N% qualified" judgment. It reflects how well the
 > developer's grounded evidence covers the JD's keywords; depth of experience,
 > years, or domain judgment are not modeled.
+
+**Batch mode (`--jd-dir`):** pass a directory instead of a single JD file to score
+the same portfolio against every `*.txt` and `*.md` file in the directory (top-level
+only) and emit a ranked Markdown table (`JD | Grade | Score | Coverage% | Top Gaps`)
+sorted best-first (Score ↓, Coverage% ↓, JD basename ↑). The portfolio is built
+**once**; only the scoring step repeats per JD.
+
+```
+python -m fit --source-type github --source <url> --author <handle> --jd-dir ./jd-files/
+```
+
+`--jd` and `--jd-dir` are mutually exclusive; supplying both or neither exits with
+code 2 and a one-line error message. An empty directory (or one with no `*.txt` /
+`*.md` files) also exits with code 2.
+
+**Batch-mode `--lang` default:** when `--jd-dir` is used and `--lang` is omitted,
+the output language is `en`. There is no auto-detection from JD contents in batch
+mode. An explicit `--lang ko` (or `--lang en`) overrides the default.
 
 The `/fit` slash command is the interactive front door; `--out <file>` writes to
 a file instead of stdout.

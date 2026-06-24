@@ -10,6 +10,25 @@ from fit.score import ScoreResult
 from portfolio.i18n import LANGS
 from portfolio.render import _escape
 
+_TOP_GAPS_N = 5
+
+
+def _escape_cell(text: str) -> str:
+    """Escape a value for use inside a Markdown table cell.
+
+    Handles:
+    - Carriage returns (\\r): replaced with a single space before delegating
+    - Newlines (\\n): delegated to portfolio.render._escape (replaced with space)
+    - Markdown-significant characters (`` ` [ ] \\ * _ # < > ``): delegated to _escape
+    - Pipe (|): backslash-escaped as \\|
+    """
+    # Replace \r first so _escape sees spaces not CR
+    text = text.replace("\r", " ")
+    # Delegate to the existing escaper for \n and Markdown specials
+    text = _escape(text)
+    # Escape pipes (table cell delimiter not handled by portfolio.render._escape)
+    return text.replace("|", "\\|")
+
 
 def render_fit(
     score_result: ScoreResult,
@@ -93,3 +112,59 @@ def render_fit(
     lines.append("")
 
     return "\n".join(lines)
+
+
+def render_fit_batch(
+    results: list[tuple[str, ScoreResult]],
+    lang: str = "en",
+) -> str:
+    """Render a ranked Markdown table of batch JD scoring results.
+
+    Columns (in order): JD, Grade, Score, Coverage%, Top Gaps.
+    Rows are sorted: Score descending, Coverage% descending, JD basename ascending.
+    Score is the band midpoint (min + max) // 2.
+    Top Gaps is the first 5 elements of sorted(score_result.gaps).
+    Column headers come from LANGS[lang]; no hardcoded English UI strings.
+
+    Cell values are escaped with _escape_cell (handles |, \\r, \\n, Markdown specials).
+    UI strings (none_notice, column headers) are rendered directly without escaping.
+    """
+    strings = LANGS[lang]
+
+    col_jd = strings["batch_col_jd"]
+    col_grade = strings["batch_col_grade"]
+    col_score = strings["batch_col_score"]
+    col_coverage = strings["batch_col_coverage"]
+    col_top_gaps = strings["batch_col_top_gaps"]
+
+    def _sort_key(item: tuple[str, ScoreResult]) -> tuple:
+        basename, sr = item
+        score = (sr.band[0] + sr.band[1]) // 2
+        return (-score, -sr.coverage_pct, basename)
+
+    sorted_results = sorted(results, key=_sort_key)
+
+    header = f"| {col_jd} | {col_grade} | {col_score} | {col_coverage} | {col_top_gaps} |"
+    sep = (
+        f"|{'-' * (len(col_jd) + 2)}"
+        f"|{'-' * (len(col_grade) + 2)}"
+        f"|{'-' * (len(col_score) + 2)}"
+        f"|{'-' * (len(col_coverage) + 2)}"
+        f"|{'-' * (len(col_top_gaps) + 2)}|"
+    )
+
+    lines = [header, sep]
+
+    for basename, sr in sorted_results:
+        score = (sr.band[0] + sr.band[1]) // 2
+        coverage_str = f"{sr.coverage_pct:.0f}%"
+
+        top_gap_tokens = sorted(sr.gaps)[:_TOP_GAPS_N]
+        if top_gap_tokens:
+            gaps_str = ", ".join(_escape_cell(g) for g in top_gap_tokens)
+        else:
+            gaps_str = strings["none_notice"]
+
+        lines.append(f"| {_escape_cell(basename)} | {_escape_cell(sr.grade)} | {score} | {coverage_str} | {gaps_str} |")
+
+    return "\n".join(lines) + "\n"
