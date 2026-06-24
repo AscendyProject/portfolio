@@ -286,18 +286,19 @@ def test_scale_zero_when_no_prs():
     assert result.dimensions["scale"].band == "Small"
 
 
-def test_score_never_exceeds_its_grade_band():
-    """A score can never land in the (95, 96) gap between the A and S bands: a
-    guard-meeting portfolio whose raw score is in the 95.x range is pulled to the
-    A-band max, so the rendered score never exceeds the band shown for its grade
-    (codex IR-001). Checked on the concrete repro + the shared fixtures."""
+def test_score_never_lands_in_a_band_gap():
+    """A one-decimal score can never exceed the integer band max shown for its grade
+    (the gaps at 54|55, 69|70, 84|85, 95|96). Repro from codex IR-001: 1 PR, 110
+    code files across 4 languages, median 80 lines has a raw score of ~69.2 — which
+    falls in the C/B gap — and must render as a clean C ≤ 69. (Discriminating: the
+    old points rubric graded this fixture B, not C.)"""
     exts = (".py", ".js", ".go", ".sql")
-    # repro: 300 PRs, 1600 files (meets the S guard's breadth axis), median 120 — raw ≈ 95.8
-    ev = [Evidence(kind="pr", ref=f"P{i}", additions=80, deletions=40) for i in range(300)]
-    ev += [Evidence(kind="file", ref=f"s/m{i}{exts[i % 4]}") for i in range(1600)]
+    ev = [Evidence(kind="pr", ref="P0", additions=50, deletions=30)]  # 1 PR, median 80
+    ev += [Evidence(kind="file", ref=f"s/m{i}{exts[i % 4]}") for i in range(110)]  # 110 files, 4 langs
     r = profile(Portfolio(subject="edge", evidence=ev, claims=[]))
-    assert r.score_min <= r.score <= r.score_max
-    assert not (95 < r.score < 96)  # the A/S gap is unreachable
+    assert r.grade == "C"  # was B under the old points rubric → discriminating
+    assert r.score_min <= r.score <= r.score_max  # never spills the band
+    assert not (69 < r.score < 70)  # the C/B gap is unreachable
 
 
 def test_s_is_gated_on_substance_not_volume_breadth():

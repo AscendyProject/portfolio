@@ -191,13 +191,9 @@ def _capability_score(metrics: dict[str, int]) -> float:
     q = sum(weight * _curve(metrics[key], a, b, c) for key, a, b, c, weight in _CAPABILITY_CURVES)
     base = (85.0 / 0.55) * q if q < 0.55 else 85.0 + 11.0 * (q - 0.55) / 0.40
     base = min(100.0, max(0.0, min(base, _substance_cap(metrics["scale"]))))
-    # A score reaches S ONLY if it both clears the S floor (96) AND meets the S
-    # guard; otherwise it is at most an A and is capped at the A-band max. This
-    # also closes the (95, 96) gap between the A and S bands, so a score can never
-    # exceed the band reported for its derived grade.
-    s_floor = GRADE_BANDS["S"][0]
-    guard = _meets_s_guard(metrics["volume"], metrics["breadth"], metrics["scale"], metrics["stack_diversity"])
-    if base < s_floor or not guard:
+    # S is reachable ONLY when the S guard is met; otherwise the score is capped at
+    # the A-band max so a non-exceptional body of work can never reach S.
+    if not _meets_s_guard(metrics["volume"], metrics["breadth"], metrics["scale"], metrics["stack_diversity"]):
         base = min(base, _NON_S_CAP)
     return round(base, 1)
 
@@ -333,6 +329,12 @@ def profile(portfolio: Portfolio) -> ProfileResult:
     score = _capability_score(metrics)
     grade = _grade_for_score(score)
     score_min, score_max = GRADE_BANDS[grade]
+    # GRADE_BANDS has integer maxima with one-unit gaps between bands (…54|55…,
+    # 69|70, 84|85, 95|96); a one-decimal score can land in a gap (e.g. 69.3 → grade
+    # C, but C's max is 69). Clamp to the derived grade's band max so the score
+    # never exceeds the band shown for its grade. Grade is unaffected (clamping
+    # toward the band min keeps it in the same band).
+    score = round(min(score, float(score_max)), 1)
 
     dimensions: dict[str, DimensionResult] = {
         "volume": DimensionResult(name="volume", value=volume_count, band=vol_band, evidence_refs=pr_refs),
