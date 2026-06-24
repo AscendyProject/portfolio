@@ -211,19 +211,27 @@ def assert_maskable(portfolio: Portfolio) -> None:
                     f"Re-run without --mask-private."
                 )
 
-        # IR-003: also check the structured ref for a GHES host label.
+        # IR-003: also check the structured ref for a host label.
         # Evidence with an empty url but a ref of the form host/owner/repo#n
-        # (three or more segments) carries a non-github.com host and must be
-        # refused even though ev.url is empty.
+        # (three or more slash-segments before # or :) carries a host prefix
+        # and must be refused, even if the host happens to be github.com.
+        # Rationale: the masking relabel layer (_parse_ref / _rewrite_ref) only
+        # handles bare two-segment owner/repo refs; a host-qualified ref cannot
+        # be discovered by extract_repo_names or relabeled by mask_portfolio, so
+        # silently passing the guard would cause the ref to leak unmasked.
+        # Failing closed for ANY non-None ref_host (including github.com) is
+        # therefore correct — bare owner/repo refs (ref_host=None) are the only
+        # shape the masking layer can actually relabel.
         # IR-004 RESIDUAL: free-text GHES identifiers in ev.detail / ev.context /
         # claim.text that have no structured ref/url are NOT covered here — they
         # are handled by the IR-004 real-GHES-masking task.
         ref_host = _ref_host(ev.ref)
-        if ref_host and ref_host not in _MASKABLE_HOSTS:
+        if ref_host is not None:
             raise MaskingError(
-                f"--mask-private does not support host {ref_host!r} (only github.com): "
-                f"private repos on GitHub Enterprise Server cannot be reliably masked, "
-                f"so the run is refused rather than risk emitting them unmasked. "
+                f"--mask-private does not support host-qualified ref {ev.ref!r} "
+                f"(host {ref_host!r}): only bare owner/repo refs can be discovered "
+                f"and relabeled by the masking layer; a host-qualified ref cannot be "
+                f"masked, so the run is refused rather than risk emitting it unmasked. "
                 f"Re-run without --mask-private."
             )
 
