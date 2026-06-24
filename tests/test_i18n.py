@@ -233,7 +233,7 @@ def test_no_english_ui_leak_rating_renderer():
         score_min=70,
         score_max=84,
         dimensions={
-            "volume": DimensionResult(name="volume", value=3, band="Low", points=0, evidence_refs=["PR#1"]),
+            "volume": DimensionResult(name="volume", value=3, band="Low", evidence_refs=["PR#1"]),
         },
     )
     grade_result = GradeResult(
@@ -352,7 +352,7 @@ def test_extensibility_prompt_builders_language_name(monkeypatch):
         grade="B",
         score_min=70,
         score_max=84,
-        dimensions={"volume": DimensionResult(name="volume", value=1, band="Low", points=0, evidence_refs=["PR#1"])},
+        dimensions={"volume": DimensionResult(name="volume", value=1, band="Low", evidence_refs=["PR#1"])},
     )
     rating_prompt = rating_build_prompt(test_portfolio, profile_result, lang="xx")
     assert "Xhosa" in rating_prompt, "rating _build_prompt does not contain language name for lang='xx'"
@@ -401,7 +401,7 @@ def test_extensibility_renderers_use_xx_ui_strings(monkeypatch):
         grade="B",
         score_min=70,
         score_max=84,
-        dimensions={"volume": DimensionResult(name="volume", value=1, band="Low", points=0, evidence_refs=["PR#1"])},
+        dimensions={"volume": DimensionResult(name="volume", value=1, band="Low", evidence_refs=["PR#1"])},
     )
     rating_grade = RatingGradeResult(score=75, grade="B", reasoning=[{"text": "ok", "evidence_refs": ["PR#1"]}])
     out = render_rating(_PORTFOLIO, profile_result, rating_grade, lang="xx")
@@ -598,11 +598,9 @@ def test_structural_no_english_leak_rating():
         score_min=70,
         score_max=84,
         dimensions={
-            "volume": DimensionResult(name="volume", value=3, band="Low", points=0, evidence_refs=["owner/repo#1"]),
-            "breadth": DimensionResult(name="breadth", value=12, band="Moderate", points=1, evidence_refs=[]),
-            "stack_diversity": DimensionResult(
-                name="stack_diversity", value=5, band="Polyglot", points=2, evidence_refs=[]
-            ),
+            "volume": DimensionResult(name="volume", value=3, band="Low", evidence_refs=["owner/repo#1"]),
+            "breadth": DimensionResult(name="breadth", value=12, band="Moderate", evidence_refs=[]),
+            "stack_diversity": DimensionResult(name="stack_diversity", value=5, band="Polyglot", evidence_refs=[]),
         },
     )
     grade_result = GradeResult(

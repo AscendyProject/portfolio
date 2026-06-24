@@ -33,42 +33,27 @@ from rating.render import render_rating  # noqa: E402
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+_FIXTURE_EXTS = (".py", ".js", ".go", ".sql")  # 4 code languages
+
+
 def _make_portfolio(subject: str = "alice") -> Portfolio:
-    """Standard test portfolio: 3 PRs + 5 distinct file refs (4 code languages → Polyglot).
-
-    volume=3 → Low (0 pts)
-    breadth=5 → Narrow (0 pts)
-    stack_diversity=4 (Python, JavaScript, Go, SQL) → Polyglot (2 pts)
-    scale=median(160) → Large (2 pts)
-    total=4 → Grade B → score band 70–84
-
-    All four diversity languages are real programming languages: non-code files
-    (config/data/markup/docs) are excluded from stack diversity, so a Polyglot
-    fixture must use code languages. Each PR carries 160 changed lines so the
-    median lands in the Large scale band (keeping the fixture at grade B now that
-    scale is a fourth dimension).
+    """Standard test portfolio sized to land at grade **B** under the capability
+    score: 30 PRs (median 80 changed lines), 50 distinct code files across 4
+    languages. Under the global-score model these moderate-but-real metrics map to
+    a score in the B band (70–84). PR#1/PR#2 exist so claims can cite real refs.
     """
-    evidence = [
+    evidence: list[Evidence] = [
         Evidence(
             kind="pr",
-            ref="PR#1",
-            url="https://github.com/o/r/pull/1",
-            detail="Add feature",
-            additions=120,
-            deletions=40,
-        ),
-        Evidence(
-            kind="pr", ref="PR#2", url="https://github.com/o/r/pull/2", detail="Fix bug", additions=120, deletions=40
-        ),
-        Evidence(
-            kind="pr", ref="PR#3", url="https://github.com/o/r/pull/3", detail="Refactor", additions=120, deletions=40
-        ),
-        Evidence(kind="file", ref="app/main.py"),
-        Evidence(kind="file", ref="app/utils.py"),
-        Evidence(kind="file", ref="web/app.js"),
-        Evidence(kind="file", ref="cmd/server.go"),
-        Evidence(kind="file", ref="data/schema.sql"),
+            ref=f"PR#{i}",
+            url=f"https://github.com/o/r/pull/{i}",
+            detail=f"change {i}",
+            additions=50,
+            deletions=30,  # 80 changed lines → median 80
+        )
+        for i in range(1, 31)
     ]
+    evidence += [Evidence(kind="file", ref=f"src/m{i}{_FIXTURE_EXTS[i % 4]}") for i in range(50)]
     claims = [
         Claim(text="Built main app feature", evidence_refs=["PR#1"], grounded=True),
         Claim(text="Fixed critical bug", evidence_refs=["PR#2"], grounded=True),
@@ -76,7 +61,7 @@ def _make_portfolio(subject: str = "alice") -> Portfolio:
     return Portfolio(subject=subject, evidence=evidence, claims=claims)
 
 
-def _fake_extractor(*, repo: str, author: str) -> list[Evidence]:
+def _fake_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
     """Returns canned Evidence for a github source; no network."""
     return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
 
@@ -155,12 +140,12 @@ def test_deterministic_grade():
     assert r1.grade == r2.grade
     assert r1.score_min == r2.score_min
     assert r1.score_max == r2.score_max
+    assert r1.score == r2.score
     assert r1.dimensions.keys() == r2.dimensions.keys()
     for k in r1.dimensions:
         d1, d2 = r1.dimensions[k], r2.dimensions[k]
         assert d1.value == d2.value
         assert d1.band == d2.band
-        assert d1.points == d2.points
         assert d1.evidence_refs == d2.evidence_refs
 
 
@@ -301,35 +286,53 @@ def test_scale_zero_when_no_prs():
     assert result.dimensions["scale"].band == "Small"
 
 
-def test_scale_large_band_lifts_grade():
-    """A small-but-substantial-PR developer (median 150+ changed lines) earns the
-    Large scale band's 2 points: here volume/breadth/diversity are all 0, so the
-    grade comes entirely from scale (2 pts → C), proving scale feeds the grade."""
-    evidence = [
-        Evidence(kind="pr", ref="PR#1", additions=300, deletions=50),  # 350
-        Evidence(kind="pr", ref="PR#2", additions=100, deletions=80),  # 180
+def test_score_never_lands_in_a_band_gap():
+    """A one-decimal score can never exceed the integer band max shown for its grade
+    (the gaps at 54|55, 69|70, 84|85, 95|96). Repro from codex IR-001: 1 PR, 110
+    code files across 4 languages, median 80 lines has a raw score of ~69.2 — which
+    falls in the C/B gap — and must render as a clean C ≤ 69. (Discriminating: the
+    old points rubric graded this fixture B, not C.)"""
+    exts = (".py", ".js", ".go", ".sql")
+    ev = [Evidence(kind="pr", ref="P0", additions=50, deletions=30)]  # 1 PR, median 80
+    ev += [Evidence(kind="file", ref=f"s/m{i}{exts[i % 4]}") for i in range(110)]  # 110 files, 4 langs
+    r = profile(Portfolio(subject="edge", evidence=ev, claims=[]))
+    assert r.grade == "C"  # was B under the old points rubric → discriminating
+    assert r.score_min <= r.score <= r.score_max  # never spills the band
+    assert not (69 < r.score < 70)  # the C/B gap is unreachable
+
+
+def test_s_is_gated_on_substance_not_volume_breadth():
+    """S cannot be reached by raw volume/breadth alone: a developer who maxes volume
+    and breadth but ships trivial PRs (tiny median change) is held well below S by
+    the substance cap. (Discriminating: the old points rubric scored this in the low
+    A range; the new substance cap drags it under 70.)"""
+    evidence = [Evidence(kind="pr", ref=f"PR#{i}", additions=1, deletions=0) for i in range(400)]  # huge volume, 1-line
+    evidence += [Evidence(kind="file", ref=f"src/m{i}.py") for i in range(1000)]  # huge breadth
+    evidence += [
+        Evidence(kind="file", ref="a.go"),
+        Evidence(kind="file", ref="b.rs"),
+        Evidence(kind="file", ref="c.rb"),
     ]
-    portfolio = Portfolio(subject="heidi", evidence=evidence, claims=[])
-    result = profile(portfolio)
-    assert result.dimensions["scale"].band == "Large"
-    assert result.dimensions["scale"].points == 2
-    assert result.grade == "C"  # 2 pts total → C under the 4-dimension rubric
+    result = profile(Portfolio(subject="bot", evidence=evidence, claims=[]))
+    assert result.grade != "S"  # substance gate holds the bot out of S
+    assert result.score < 70  # and the substance cap drags it down, not just shy of 96
 
 
-def test_grade_s_requires_all_four_dimensions_maxed():
-    """S (8 pts) is unreachable without the scale dimension: a developer who maxes
-    volume + breadth + diversity but has trivial PRs tops out at A, not S."""
-    evidence = [Evidence(kind="pr", ref=f"PR#{i}", additions=1, deletions=0) for i in range(20)]  # 20 PRs, 1 line each
-    evidence += [Evidence(kind="file", ref=f"src/m{i}.py") for i in range(15)]  # Python
-    evidence += [Evidence(kind="file", ref=f"web/c{i}.js") for i in range(15)]  # JavaScript → 30 files, 2 langs
-    evidence += [Evidence(kind="file", ref="cmd/s.go"), Evidence(kind="file", ref="q.sql")]  # 4 langs total
-    portfolio = Portfolio(subject="ivan", evidence=evidence, claims=[])
-    result = profile(portfolio)
-    assert result.dimensions["volume"].points == 2
-    assert result.dimensions["breadth"].points == 2
-    assert result.dimensions["stack_diversity"].points == 2
-    assert result.dimensions["scale"].points == 0  # median 1 changed line → Small
-    assert result.grade == "A"  # 6 pts, NOT S — the old rubric would have said S
+def test_s_bar_raised_old_8point_portfolio_no_longer_s():
+    """The S bar is far higher than the old points rubric. A portfolio that maxed
+    the OLD per-dimension bands (20 PRs, 30 files, 4 languages, median 150 lines) —
+    which scored a full 8 points = S before — no longer reaches S; only genuinely
+    exceptional volume+breadth+scale does. (Discriminating: was S pre-change.)"""
+    exts = (".py", ".js", ".go", ".rs")
+    old_max = [Evidence(kind="pr", ref=f"P{i}", additions=100, deletions=50) for i in range(20)]  # median 150
+    old_max += [Evidence(kind="file", ref=f"s/m{i}{exts[i % 4]}") for i in range(30)]  # 30 files, 4 langs
+    assert profile(Portfolio(subject="oldS", evidence=old_max, claims=[])).grade != "S"
+
+    # The S guard still ADMITS real all-around-substantial work.
+    big_exts = (".py", ".js", ".go", ".rs", ".rb", ".kt")
+    mon = [Evidence(kind="pr", ref=f"M{i}", additions=150, deletions=80) for i in range(500)]  # median 230
+    mon += [Evidence(kind="file", ref=f"s/m{i}{big_exts[i % 6]}") for i in range(2000)]
+    assert profile(Portfolio(subject="mon", evidence=mon, claims=[])).grade == "S"
 
 
 # ---------------------------------------------------------------------------
@@ -474,17 +477,30 @@ def test_score_is_inside_the_locked_band():
 
 def test_scores_differ_within_the_same_band():
     """Two portfolios in the SAME grade band but with different metrics get
-    DIFFERENT scores — the anti-clustering guarantee (no more everyone-gets-98)."""
-    # P1: grade B via stack diversity (2) + scale (2)
-    p1 = _make_portfolio()
-    # P2: grade B via volume (2) + breadth (2), trivial single-language PRs
-    evidence = [Evidence(kind="pr", ref=f"PR#{i}", additions=1, deletions=0) for i in range(50)]  # High volume
-    evidence += [Evidence(kind="file", ref=f"src/m{i}.py") for i in range(60)]  # Wide breadth, 1 language
-    p2 = Portfolio(subject="bob", evidence=evidence, claims=[])
+    DIFFERENT scores — the anti-clustering guarantee (no more everyone-the-same)."""
+    p1 = _make_portfolio()  # B ~78.8
+    # A different B-grade shape: fewer PRs/files but larger typical change.
+    ev = [Evidence(kind="pr", ref=f"PR#{i}", additions=70, deletions=30) for i in range(25)]  # median 100
+    ev += [Evidence(kind="file", ref=f"src/m{i}{('.py', '.go', '.rs')[i % 3]}") for i in range(40)]  # 3 langs
+    p2 = Portfolio(subject="bob", evidence=ev, claims=[])
 
     r1, r2 = profile(p1), profile(p2)
     assert r1.grade == r2.grade == "B"  # same band
     assert r1.score != r2.score  # but distinguishable scores
+
+
+def test_strong_A_devs_differentiate_by_volume():
+    """Regression for the real 'two strong colleagues both 92/93' collapse: two
+    A-grade developers who differ only in raw volume (one 2× the other) must get
+    DIFFERENT scores — the old design pinned both at the same number."""
+    exts = (".py", ".js", ".go", ".sql")
+    files = [Evidence(kind="file", ref=f"src/m{i}{exts[i % 4]}") for i in range(1000)]
+    lo = [Evidence(kind="pr", ref=f"L{i}", additions=120, deletions=40) for i in range(100)]  # vol 100
+    hi = [Evidence(kind="pr", ref=f"H{i}", additions=120, deletions=40) for i in range(300)]  # vol 300
+    r_lo = profile(Portfolio(subject="lo", evidence=lo + files, claims=[]))
+    r_hi = profile(Portfolio(subject="hi", evidence=hi + list(files), claims=[]))
+    assert r_lo.grade == r_hi.grade == "A"
+    assert r_hi.score > r_lo.score  # 3×… er, 2× volume now actually moves the score
 
 
 # ---------------------------------------------------------------------------
@@ -512,10 +528,10 @@ def test_profile_assigns_sub_tier():
 def test_sub_tier_orders_within_same_grade():
     """A stronger same-grade portfolio gets a higher (or equal) suffix than a
     weaker one — the suffix refines, consistent with the score ordering."""
-    weak = profile(_make_portfolio())  # grade B, lower score
-    evidence = [Evidence(kind="pr", ref=f"PR#{i}", additions=1, deletions=0) for i in range(50)]
-    evidence += [Evidence(kind="file", ref=f"src/m{i}.py") for i in range(60)]
-    strong = profile(Portfolio(subject="bob", evidence=evidence, claims=[]))  # grade B, higher score
+    weak = profile(_make_portfolio())  # B, flat (~78.8)
+    ev = [Evidence(kind="pr", ref=f"PR#{i}", additions=80, deletions=40) for i in range(40)]  # median 120
+    ev += [Evidence(kind="file", ref=f"src/m{i}{('.py', '.js', '.go', '.sql')[i % 4]}") for i in range(70)]  # 4 langs
+    strong = profile(Portfolio(subject="bob", evidence=ev, claims=[]))  # higher within B
     assert weak.grade == strong.grade == "B"
     order = {"-": 0, "": 1, "+": 2}
     assert order[strong.sub_tier] >= order[weak.sub_tier]

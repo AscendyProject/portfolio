@@ -408,3 +408,38 @@ def test_ssrf_ip_literal_rejected_before_extractor_called():
             ),
         )
     assert calls == [], "extractor must not be called for a rejected SSRF URL"
+
+
+# ---------------------------------------------------------------------------
+# limit threading (the gh --limit, raised via the CLI --limit flag)
+# ---------------------------------------------------------------------------
+
+
+def test_github_threads_limit_to_extractor():
+    """SourceRequest.limit reaches the github extractor."""
+    extractor, calls = _recording_extractor()
+    resolve_source(
+        "github",
+        SourceRequest(source="https://github.com/o/r", author="alice", extractor=extractor, limit=500),
+    ).extract()
+    assert calls[0]["limit"] == 500
+
+
+def test_github_limit_defaults_to_100():
+    """An unset limit defaults to 100 (mirrors the extractor default)."""
+    extractor, calls = _recording_extractor()
+    resolve_source(
+        "github",
+        SourceRequest(source="https://github.com/o/r", author="alice", extractor=extractor),
+    ).extract()
+    assert calls[0]["limit"] == 100
+
+
+def test_github_author_threads_limit_to_extractor():
+    """SourceRequest.limit reaches the github-author extractor."""
+    author_extractor, calls = _recording_author_extractor()
+    resolve_source(
+        "github-author",
+        SourceRequest(source=None, author="alice", author_extractor=author_extractor, limit=250),
+    ).extract()
+    assert calls[0]["limit"] == 250

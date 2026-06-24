@@ -94,6 +94,10 @@ internal IP is still forwarded to `gh`; a host allowlist is the follow-up mitiga
 Pointing `--source-type web` at a code-host repo URL is **not** a substitute — it
 scrapes the page as an article and grounds nothing.
 
+`--limit N` (default 100) caps how many merged PRs the `github` / `github-author`
+sources pull. Raise it for a prolific author whose evidence is truncated at 100
+(e.g. `--limit 300`); the trade-off is more `gh` calls, so it runs slower.
+
 The rendered document leads with a grounded headline blockquote (model-authored, or a
 deterministic fallback when grounding fails), followed by a stats line showing merged-PR
 count, distinct repo count, and the detected language stack. When the model returns
@@ -171,14 +175,18 @@ a file instead of stdout.
 
 Run `python -m rating --source-type <type> --source <url> --author <handle>` to produce
 a grounded **capability assessment** — a deterministic grade (S/A/B/C/D) and rubric score
-(0–100) — from the developer's real evidence. The grade is computed deterministically from
-evidence-derived metrics (volume of merged PRs, breadth of changed files, stack diversity,
-and change scale) and locks a score band. The precise score within that band is also
-deterministic — a continuous function of the same metrics, so two developers in the same
-band get different scores rather than clustering on one value. The grade also carries a
-`+`/flat/`-` suffix (e.g. `B+`, `B`, `B-`) from the score's position within its band, so
-same-grade developers are visibly ordered. A temperature-0 agent writes only the
-grounding-checked reasoning; it changes neither the grade nor the score. Stack
+(0–100, shown to one decimal) — from the developer's real evidence. The score is a single
+deterministic, continuous function of the evidence-derived metrics (volume of merged PRs,
+breadth of changed files, stack diversity, and change scale): each is mapped through a
+piecewise curve toward absolute, product-defined anchors and weighted. The **grade is the
+band that score falls in** (`S=96–100`, `A=85–95`, `B=70–84`, `C=55–69`, `D=0–54`), and it
+carries a `+`/flat/`-` suffix (e.g. `B+`, `B`, `B-`) from the score's position within the
+band. Because the curves keep large values separated, two strong developers who differ in
+(say) volume get different scores instead of clustering. A **substance cap** (a trivial
+median change size can't reach a top grade on raw volume/breadth alone) and an **S guard**
+(reserved for genuinely all-around-substantial work) keep the top honest and S rare. A
+temperature-0 agent writes only the grounding-checked reasoning; it changes neither the
+grade nor the score. Stack
 diversity counts distinct *programming* languages only — config/data/markup/documentation files
 (YAML, JSON, Markdown, HTML, CSS) and files with an unmapped extension (`.toml`, `.ini`,
 `Dockerfile`, …, which collapse to a single "other" bucket) are excluded so a repo's

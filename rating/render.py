@@ -55,11 +55,7 @@ def render_rating(
         heading = dimension_names.get(dim_name, dim_name)
         band_label = band_labels.get(dim.band, dim.band)
         lines.append(f"### {_escape(heading)}")
-        lines.append(
-            f"- {strings['dim_value_label']}: {dim.value}  "
-            f"{strings['dim_band_label']}: {band_label}  "
-            f"{strings['dim_points_label']}: {dim.points}"
-        )
+        lines.append(f"- {strings['dim_value_label']}: {dim.value}  {strings['dim_band_label']}: {band_label}")
         if show_refs and dim.evidence_refs:
             refs_str = ", ".join(_escape(r) for r in dim.evidence_refs)
             lines.append(f"- {strings['evidence_refs_label']}: {refs_str}")

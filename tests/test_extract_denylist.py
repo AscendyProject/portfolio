@@ -482,10 +482,9 @@ class TestJsj0345Regression:
         brd = result.dimensions["breadth"]
         assert brd.value == 4
         assert brd.band == "Narrow"
-        assert brd.points == 0
 
     def test_rating_stack_diversity_polyglot(self) -> None:
-        """Done-when: stack_diversity value=4 / band="Polyglot" / points=2
+        """Done-when: stack_diversity value=4 / band="Polyglot"
         (Python .py, TypeScript .ts, Java .java, Kotlin .kt — all in _EXT_TO_LANG)."""
         search_json, files_by_pr = _make_regression_fixtures()
         ev = parse_authored_pr_evidence(search_json, files_by_pr)
@@ -494,7 +493,6 @@ class TestJsj0345Regression:
         div = result.dimensions["stack_diversity"]
         assert div.value == 4
         assert div.band == "Polyglot"
-        assert div.points == 2
 
     def test_46_denied_paths_all_match(self) -> None:
         """Sanity: every path in _DENIED_46 is actually denied by the helper."""

@@ -596,7 +596,7 @@ def test_resolve_no_mask_unchanged():
 # ---------------------------------------------------------------------------
 
 
-def _fake_github_extractor(*, repo: str, author: str) -> list[Evidence]:
+def _fake_github_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
     return [Evidence(kind="pr", ref="acme/svc#1", url="https://github.com/acme/svc/pull/1", detail="Add feature")]
 
 

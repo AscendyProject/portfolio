@@ -30,7 +30,7 @@ from portfolio.model import Claim, Evidence, Portfolio  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-def _fake_extractor(*, repo: str, author: str) -> list[Evidence]:
+def _fake_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
     """Returns canned Evidence; no network."""
     return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
 
@@ -146,7 +146,7 @@ def test_rating_grader_prompt_contains_language_name_ko():
         grade="B",
         score_min=70,
         score_max=84,
-        dimensions={"volume": DimensionResult(name="volume", value=3, band="Low", points=0, evidence_refs=["PR#1"])},
+        dimensions={"volume": DimensionResult(name="volume", value=3, band="Low", evidence_refs=["PR#1"])},
     )
     prompt = _build_prompt(portfolio, profile_result, lang="ko")
     assert language_name("ko") in prompt
@@ -240,7 +240,7 @@ def test_rating_renderer_deterministic_ko():
         grade="B",
         score_min=70,
         score_max=84,
-        dimensions={"volume": DimensionResult(name="volume", value=3, band="Low", points=0, evidence_refs=["PR#1"])},
+        dimensions={"volume": DimensionResult(name="volume", value=3, band="Low", evidence_refs=["PR#1"])},
     )
     grade_result = GradeResult(
         score=75,
@@ -900,7 +900,7 @@ def test_rating_grader_refs_byte_identical_across_langs():
         grade="B",
         score_min=70,
         score_max=84,
-        dimensions={"volume": DimensionResult(name="volume", value=1, band="Low", points=0, evidence_refs=refs)},
+        dimensions={"volume": DimensionResult(name="volume", value=1, band="Low", evidence_refs=refs)},
     )
     prompt_en = _build_prompt(portfolio, profile_result, lang="en")
     prompt_ko = _build_prompt(portfolio, profile_result, lang="ko")

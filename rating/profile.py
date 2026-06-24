@@ -113,17 +113,6 @@ _SCALE_BANDS: list[tuple[str, int, int]] = [
     ("Small", 0, 0),  # 0–29 → 0 pts
 ]
 
-# Points total → grade (highest threshold first). Four dimensions × 2 pts → max 8.
-# S now requires maxing ALL four (incl. substantial typical change size), so it is
-# no longer reachable on volume/breadth/diversity alone — the prior saturation.
-_POINTS_TO_GRADE: list[tuple[int, str]] = [
-    (8, "S"),
-    (6, "A"),
-    (4, "B"),
-    (2, "C"),
-    (0, "D"),
-]
-
 
 def _median(values: list[int]) -> int:
     """Median of a list of ints, rounded down to an int (0 for an empty list).
@@ -138,17 +127,84 @@ def _median(values: list[int]) -> int:
     return (ordered[mid - 1] + ordered[mid]) // 2
 
 
-# Reference ceiling per dimension for the continuous score: the raw metric value
-# at which a dimension is treated as a full-strength showing (normalized sub-score
-# = 1.0). Pinned in code (a model never sets these) and deliberately set ABOVE the
-# top band threshold, so the score keeps rising past the point where the discrete
-# grade saturates — this is what spreads scores out within a band.
-_SCORE_CEILINGS: dict[str, int] = {
-    "volume": 50,  # merged PRs
-    "breadth": 60,  # distinct code files
-    "stack_diversity": 6,  # distinct code languages
-    "scale": 400,  # median changed lines/PR
-}
+# --- Capability score (0–100) → grade -----------------------------------------
+# The grade is the GRADE_BANDS interval the score falls in (score is primary; the
+# letter is derived). Each metric is mapped through a piecewise curve toward
+# absolute, product-defined anchors (a = entry, b = strong, c = exceptional),
+# weighted, and mapped to 0–100. Designed and validated on real portfolios so that
+# STRONG developers spread out across the range (the prior design pinned them all
+# near one number) while S stays rare. Criterion-referenced: anchors are absolute
+# "this much grounded work" judgments, never a population/percentile.
+#   (dimension, a, b, c, weight)
+_CAPABILITY_CURVES: tuple[tuple[str, int, int, int, float], ...] = (
+    ("volume", 100, 300, 800, 0.35),
+    ("breadth", 400, 1200, 3000, 0.30),
+    ("scale", 10, 80, 220, 0.25),
+    ("stack_diversity", 2, 5, 8, 0.10),
+)
+
+
+def _curve(value: int, a: int, b: int, c: int) -> float:
+    """Piecewise map of a raw metric to [0, 1]. Concave below the entry anchor `a`
+    (so small-but-real work registers), near-linear `a→b`, slow `b→c`, flat at 1.0
+    beyond `c`. Unlike a log curve it keeps LARGE values separated, which is what
+    lets strong developers differ instead of all pinning at the top."""
+    if value <= 0:
+        return 0.0
+    if value < a:
+        return 0.55 * (value / a) ** 0.40
+    if value < b:
+        return 0.55 + 0.40 * (value - a) / (b - a)
+    if value < c:
+        return 0.95 + 0.05 * (value - b) / (c - b)
+    return 1.0
+
+
+def _substance_cap(scale: int) -> float:
+    """Trivial typical change size caps the score (continuous, no cliff): a body of
+    work whose median PR is tiny (config-only / rubber-stamp / bot) cannot reach a
+    top grade on raw volume + breadth alone. Fully released (no cap) at median ≥ 10
+    code lines/PR; floors at 40 for a median of 0."""
+    return 40.0 + 60.0 * min(1.0, scale / 10.0)
+
+
+def _meets_s_guard(volume: int, breadth: int, scale: int, diversity: int) -> bool:
+    """S is reachable ONLY for a genuinely exceptional, all-around-substantial body
+    of work — never high volume/breadth alone (that would re-saturate the top, the
+    original '98 for everyone' bug). Requires substance on every axis plus one
+    axis well beyond the strong-developer envelope."""
+    return (
+        volume >= 250
+        and breadth >= 900
+        and diversity >= 4
+        and scale >= 40
+        and (volume >= 400 or breadth >= 1600 or scale >= 120)
+    )
+
+
+_NON_S_CAP = 95.0  # non-exceptional work tops out at the A-band max; only the S guard lifts above it
+
+
+def _capability_score(metrics: dict[str, int]) -> float:
+    """Deterministic capability score in [0, 100] (one decimal) from the metric
+    values. Pure function — the model never picks it, so it cannot cluster."""
+    q = sum(weight * _curve(metrics[key], a, b, c) for key, a, b, c, weight in _CAPABILITY_CURVES)
+    base = (85.0 / 0.55) * q if q < 0.55 else 85.0 + 11.0 * (q - 0.55) / 0.40
+    base = min(100.0, max(0.0, min(base, _substance_cap(metrics["scale"]))))
+    # S is reachable ONLY when the S guard is met; otherwise the score is capped at
+    # the A-band max so a non-exceptional body of work can never reach S.
+    if not _meets_s_guard(metrics["volume"], metrics["breadth"], metrics["scale"], metrics["stack_diversity"]):
+        base = min(base, _NON_S_CAP)
+    return round(base, 1)
+
+
+def _grade_for_score(score: float) -> str:
+    """The letter grade is the GRADE_BANDS interval the score falls in (highest
+    band whose minimum the score meets)."""
+    for g in ("S", "A", "B", "C", "D"):
+        if score >= GRADE_BANDS[g][0]:
+            return g
+    return "D"
 
 
 # Sub-tier suffixes within a grade, ordered bottom → top. The deterministic
@@ -159,7 +215,7 @@ _SCORE_CEILINGS: dict[str, int] = {
 _SUB_TIER_SYMBOLS: tuple[str, str, str] = ("-", "", "+")
 
 
-def _sub_tier(score: int, score_min: int, score_max: int) -> str:
+def _sub_tier(score: float, score_min: int, score_max: int) -> str:
     """Sub-tier suffix ("+", "" or "-") from the score's position within its band:
     top third → "+", middle → "" (flat), bottom → "-". A zero-width band (not
     produced by the real rubric) maps to flat."""
@@ -169,24 +225,6 @@ def _sub_tier(score: int, score_min: int, score_max: int) -> str:
     fraction = (score - score_min) / span
     index = min(2, max(0, int(fraction * 3)))
     return _SUB_TIER_SYMBOLS[index]
-
-
-def _continuous_score(dimensions: dict[str, DimensionResult], score_min: int, score_max: int) -> int:
-    """A deterministic score inside [score_min, score_max].
-
-    Each dimension's raw value is normalized to [0,1] against its ceiling; the mean
-    position is interpolated within the locked band. Pure function of the metrics —
-    so two different portfolios in the same grade band get DIFFERENT scores, instead
-    of an agent freely picking (and clustering on) a number. The agent now writes
-    only the qualitative reasoning, never the score."""
-    positions: list[float] = []
-    for key, ceiling in _SCORE_CEILINGS.items():
-        dim = dimensions.get(key)
-        if dim is None or ceiling <= 0:
-            continue
-        positions.append(min(1.0, max(0.0, dim.value / ceiling)))
-    fraction = sum(positions) / len(positions) if positions else 0.0
-    return round(score_min + fraction * (score_max - score_min))
 
 
 def _band_for(value: int, bands: list[tuple[str, int, int]]) -> tuple[str, int]:
@@ -213,20 +251,20 @@ def _file_ext(ref: str) -> str:
 class DimensionResult:
     name: str
     value: int  # raw metric value
-    band: str  # e.g. "Low", "Steady", "High"
-    points: int  # contribution to grade total
+    band: str  # qualitative tier for display, e.g. "Low"/"Steady"/"High"
     evidence_refs: list[str] = field(default_factory=list)
 
 
 @dataclass
 class ProfileResult:
     dimensions: dict[str, DimensionResult]  # "volume", "breadth", "stack_diversity", "scale"
-    grade: str  # S / A / B / C / D
-    score_min: int
-    score_max: int
-    # Deterministic continuous score inside [score_min, score_max], computed from
-    # the dimension metrics (default 0 so hand-built instances in tests stay valid).
-    score: int = 0
+    grade: str  # S / A / B / C / D — derived from `score` (its GRADE_BANDS interval)
+    score_min: int  # the grade band's min (for display + sub-tier position)
+    score_max: int  # the grade band's max
+    # Deterministic capability score in [0, 100] (one decimal), computed from the
+    # dimension metrics; the grade is the GRADE_BANDS interval this score falls in.
+    # Default 0 so hand-built instances in tests stay valid.
+    score: float = 0.0
     # Sub-tier suffix within the grade ("+", "" flat, or "-") from the score's
     # band position; "" for hand-built instances that don't compute it (renders
     # as the bare letter, indistinguishable from a flat mid-band tier).
@@ -236,9 +274,10 @@ class ProfileResult:
 def profile(portfolio: Portfolio) -> ProfileResult:
     """Pure deterministic profiler over a grounded Portfolio.
 
-    Returns metrics (volume, breadth, stack_diversity, scale), per-dimension
-    bands, overall grade ∈ {S,A,B,C,D}, a (min,max) score band, a deterministic
-    continuous score inside that band, and a sub-tier suffix (+/flat/-).
+    Returns metrics (volume, breadth, stack_diversity, scale), a per-dimension
+    display band, a deterministic capability score ∈ [0,100], the overall grade
+    ∈ {S,A,B,C,D} (the GRADE_BANDS interval that score falls in), the (min,max) of
+    that band, and a sub-tier suffix (+/flat/-).
 
     Makes NO subprocess, open, or network call — stdlib only.
     Unknown file extensions map to the literal string "other" (never guessed by a model).
@@ -247,13 +286,13 @@ def profile(portfolio: Portfolio) -> ProfileResult:
     # --- Volume: count of Evidence(kind="pr") ---
     pr_refs = [e.ref for e in portfolio.evidence if e.kind == "pr"]
     volume_count = len(pr_refs)
-    vol_band, vol_pts = _band_for(volume_count, _VOLUME_BANDS)
+    vol_band, _ = _band_for(volume_count, _VOLUME_BANDS)
 
     # --- Breadth: count of DISTINCT Evidence(kind="file") refs ---
     file_refs_set = {e.ref for e in portfolio.evidence if e.kind == "file"}
     file_refs = sorted(file_refs_set)  # sorted for determinism
     breadth_count = len(file_refs)
-    brd_band, brd_pts = _band_for(breadth_count, _BREADTH_BANDS)
+    brd_band, _ = _band_for(breadth_count, _BREADTH_BANDS)
 
     # --- Stack diversity: distinct PROGRAMMING languages via the FIXED table ---
     # Two exclusions so the count reflects real coding range, not file spread:
@@ -273,55 +312,47 @@ def profile(portfolio: Portfolio) -> ProfileResult:
         langs.add(lang)
         code_file_refs.append(ref)
     diversity_count = len(langs)
-    div_band, div_pts = _band_for(diversity_count, _DIVERSITY_BANDS)
+    div_band, _ = _band_for(diversity_count, _DIVERSITY_BANDS)
 
     # --- Change scale: median (additions + deletions) over the PR evidence ---
     pr_evidence = [e for e in portfolio.evidence if e.kind == "pr"]
     scale_value = _median([e.additions + e.deletions for e in pr_evidence])
-    scl_band, scl_pts = _band_for(scale_value, _SCALE_BANDS)
+    scl_band, _ = _band_for(scale_value, _SCALE_BANDS)
 
-    # --- Overall grade from total points ---
-    total_pts = vol_pts + brd_pts + div_pts + scl_pts
-    grade = "D"
-    for threshold, g in _POINTS_TO_GRADE:
-        if total_pts >= threshold:
-            grade = g
-            break
-
+    # --- Capability score → grade (score is primary; the letter is its band) ---
+    metrics = {
+        "volume": volume_count,
+        "breadth": breadth_count,
+        "scale": scale_value,
+        "stack_diversity": diversity_count,
+    }
+    score = _capability_score(metrics)
+    grade = _grade_for_score(score)
     score_min, score_max = GRADE_BANDS[grade]
+    # GRADE_BANDS has integer maxima with one-unit gaps between bands (…54|55…,
+    # 69|70, 84|85, 95|96); a one-decimal score can land in a gap (e.g. 69.3 → grade
+    # C, but C's max is 69). Clamp to the derived grade's band max so the score
+    # never exceeds the band shown for its grade. Grade is unaffected (clamping
+    # toward the band min keeps it in the same band).
+    score = round(min(score, float(score_max)), 1)
 
     dimensions: dict[str, DimensionResult] = {
-        "volume": DimensionResult(
-            name="volume",
-            value=volume_count,
-            band=vol_band,
-            points=vol_pts,
-            evidence_refs=pr_refs,
-        ),
-        "breadth": DimensionResult(
-            name="breadth",
-            value=breadth_count,
-            band=brd_band,
-            points=brd_pts,
-            evidence_refs=file_refs,
-        ),
+        "volume": DimensionResult(name="volume", value=volume_count, band=vol_band, evidence_refs=pr_refs),
+        "breadth": DimensionResult(name="breadth", value=breadth_count, band=brd_band, evidence_refs=file_refs),
         "stack_diversity": DimensionResult(
             name="stack_diversity",
             value=diversity_count,
             band=div_band,
-            points=div_pts,
             evidence_refs=code_file_refs,  # only refs that contributed a counted (code) language
         ),
         "scale": DimensionResult(
             name="scale",
             value=scale_value,
             band=scl_band,
-            points=scl_pts,
             evidence_refs=pr_refs,  # the PRs whose change sizes the median was taken over
         ),
     }
 
-    score = _continuous_score(dimensions, score_min, score_max)
     sub_tier = _sub_tier(score, score_min, score_max)
 
     return ProfileResult(
