@@ -110,7 +110,7 @@ def test_jd_dir_happy_path(tmp_path, capsys):
 
 
 def test_jd_dir_extension_filter(tmp_path, capsys):
-    """'--jd-dir scans <dir> non-recursively; accepts ONLY .txt and .md (case-sensitive);
+    """'--jd-dir scans <dir> non-recursively; accepts ONLY .txt, .md, .pdf (case-sensitive);
     ignores .json, .txt.bak, and subdirectories.'"""
     (tmp_path / "job.txt").write_text("python backend", encoding="utf-8")
     (tmp_path / "other.md").write_text("java spring", encoding="utf-8")
@@ -524,9 +524,9 @@ def test_batch_fetcher_passed_through(tmp_path, capsys):
     # Discriminating assertion: the web source resolves extract() to fetcher(url);
     # batch mode must have threaded the injected fetcher through SourceRequest, so
     # the fetcher is actually invoked with the normalized article URL.
-    assert fetcher_calls == ["https://blog.example.com/post"], (
-        "batch mode must thread the injected fetcher through to the web source resolve path"
-    )
+    assert fetcher_calls == [
+        "https://blog.example.com/post"
+    ], "batch mode must thread the injected fetcher through to the web source resolve path"
 
 
 # ---------------------------------------------------------------------------
@@ -674,9 +674,9 @@ def test_lang_ko_no_english_leak_in_batch_table(tmp_path, capsys):
         ko_val = LANGS["ko"][key]
         if en_val == ko_val:
             continue  # language-neutral (e.g. "JD" is same in both)
-        assert en_val not in captured.out, (
-            f"English UI string LANGS['en']['{key}']={en_val!r} leaked into ko batch render"
-        )
+        assert (
+            en_val not in captured.out
+        ), f"English UI string LANGS['en']['{key}']={en_val!r} leaked into ko batch render"
 
     # Korean column headers must appear
     assert LANGS["ko"]["batch_col_grade"] in captured.out
@@ -755,6 +755,57 @@ def test_jd_file_oserror_exits_1(tmp_path, capsys):
     finally:
         # Restore permissions so tmp_path cleanup works
         jd_file.chmod(0o644)
+
+
+def test_batch_picks_up_and_extracts_pdf_jd(tmp_path, capsys, monkeypatch):
+    """A PDF JD in --jd-dir is matched and extracted the same way as single --jd
+    (via load_jd → pypdf), so batch mode is consistent with single mode (#70).
+    A fake pypdf stands in for the optional dependency."""
+    import types
+
+    module = types.ModuleType("pypdf")
+
+    class _Page:
+        def extract_text(self) -> str:
+            return "python backend kubernetes"
+
+    class PdfReader:
+        def __init__(self, _stream) -> None:
+            self.pages = [_Page()]
+
+    module.PdfReader = PdfReader  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pypdf", module)
+
+    (tmp_path / "role.pdf").write_bytes(b"%PDF-1.4 fake pdf bytes")
+    (tmp_path / "other.txt").write_text("python backend", encoding="utf-8")
+
+    code = run(
+        _base_batch_argv(str(tmp_path), lang="en"),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_make_grader_runner(80),
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "role.pdf" in out  # the PDF JD is included in the ranked batch output
+
+
+def test_batch_missing_pypdf_on_pdf_jd_errors_cleanly(tmp_path, capsys, monkeypatch):
+    """A .pdf in --jd-dir without pypdf installed fails with a clear error (the same
+    optional-dependency message as single --jd), not a traceback."""
+    monkeypatch.setitem(sys.modules, "pypdf", None)  # import pypdf → ImportError
+    (tmp_path / "role.pdf").write_bytes(b"%PDF-1.4 fake pdf bytes")
+
+    code = run(
+        _base_batch_argv(str(tmp_path), lang="en"),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_make_grader_runner(80),
+    )
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "pypdf" in captured.err
+    assert "Traceback" not in captured.err
 
 
 # ---------------------------------------------------------------------------
