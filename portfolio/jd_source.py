@@ -17,6 +17,12 @@ from portfolio.web import _ArticleParser, parse_web_source
 # `.pdf` extension, so a mis-named or extension-less PDF is still handled.
 _PDF_MAGIC = b"%PDF-"
 
+# Resource caps for file / PDF JD input (codex IR-001): a malicious or malformed
+# PDF must not exhaust memory/CPU. A real job description is far smaller than these.
+_JD_MAX_BYTES = 20 * 1024 * 1024  # 20 MiB — file-size ceiling for any --jd file
+_PDF_MAX_PAGES = 500  # page-count ceiling for a PDF --jd
+_PDF_MAX_TEXT_CHARS = 2 * 1024 * 1024  # extracted-text ceiling (2M chars)
+
 
 class JDFileReadError(Exception):
     """Raised when the file branch cannot read the JD from disk."""
@@ -78,6 +84,12 @@ def load_jd(value: str, *, fetcher: Callable[[str], str]) -> str:
         # extracted to text (best-effort — the JD only drives selection, never
         # grounding), everything else is decoded as UTF-8 as before.
         try:
+            size = Path(value).stat().st_size
+        except OSError as exc:
+            raise JDFileReadError(str(exc)) from exc
+        if size > _JD_MAX_BYTES:
+            raise JDFileReadError(f"--jd file is too large ({size} bytes > {_JD_MAX_BYTES} limit)")
+        try:
             data = Path(value).read_bytes()
         except OSError as exc:
             raise JDFileReadError(str(exc)) from exc
@@ -106,7 +118,28 @@ def _extract_pdf_text(data: bytes) -> str:
 
     try:
         reader = pypdf.PdfReader(io.BytesIO(data))
-        text = "\n".join((page.extract_text() or "") for page in reader.pages)
+        if reader.is_encrypted:
+            raise JDFileReadError("the PDF --jd is encrypted; decrypt it or convert to a UTF-8 .txt")
+        n_pages = len(reader.pages)
+        if n_pages > _PDF_MAX_PAGES:
+            raise JDFileReadError(f"the PDF --jd has too many pages ({n_pages} > {_PDF_MAX_PAGES} limit)")
+        parts: list[str] = []
+        total = 0
+        for page in reader.pages:
+            # pypdf has no streaming text API, so a page is materialized by
+            # extract_text() before we can measure it. The per-page check below
+            # rejects a single oversized page immediately (no accumulation), and
+            # the file (20 MiB) + page (500) caps bound the worst single page.
+            # Full isolation of extract_text() (subprocess + timeout/rlimit) is a
+            # documented follow-up, not done here.
+            chunk = page.extract_text() or ""
+            if len(chunk) > _PDF_MAX_TEXT_CHARS or total + len(chunk) > _PDF_MAX_TEXT_CHARS:
+                raise JDFileReadError(f"the PDF --jd extracted text exceeds the {_PDF_MAX_TEXT_CHARS}-char limit")
+            total += len(chunk)
+            parts.append(chunk)
+        text = "\n".join(parts)
+    except JDFileReadError:
+        raise  # our own limit/encryption errors are already actionable
     except Exception as exc:  # pypdf raises various errors on malformed PDFs
         raise JDFileReadError(f"could not read the PDF --jd: {exc}") from exc
 
