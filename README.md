@@ -222,6 +222,11 @@ produce an absolute percentile, global comparison, or any claim about the develo
 standing relative to a population.** The `/rating` slash command is the interactive front
 door; `--out <file>` writes to a file instead of stdout.
 
+> **Criterion-referenced, not a percentile:** the grade anchors on absolute, product-chosen
+> evidence thresholds ("this much grounded work demonstrates this level of capability"),
+> not on any developer population. The score does not shift with whoever is run through the
+> tool and carries no percentile, rank, or hiring-readiness claim.
+
 ## Source types
 
 All five commands accept `--source-type` to select the evidence source:
