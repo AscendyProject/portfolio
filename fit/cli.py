@@ -49,7 +49,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--jd-dir",
         default=None,
-        help="directory of JD files (*.txt, *.md) to score in batch; mutually exclusive with --jd",
+        help="directory of JD files (*.txt, *.md, *.pdf) to score in batch; mutually exclusive with --jd",
     )
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
     parser.add_argument(
@@ -203,8 +203,9 @@ def _run_batch(
     """Execute batch mode: score the portfolio against every JD in --jd-dir."""
     jd_dir = Path(args.jd_dir)
 
-    # Collect matching files non-recursively; accepted suffixes are .txt and .md (case-sensitive).
-    _ACCEPTED_SUFFIXES = {".txt", ".md"}
+    # Collect matching files non-recursively; accepted suffixes are .txt, .md, .pdf
+    # (case-sensitive). PDFs are extracted via load_jd, exactly like single --jd.
+    _ACCEPTED_SUFFIXES = {".txt", ".md", ".pdf"}
     try:
         entries = list(jd_dir.iterdir())
     except OSError:
@@ -216,7 +217,7 @@ def _run_batch(
     )
 
     if not jd_files:
-        print(f"--jd-dir {args.jd_dir!r}: no matching JD files (*.txt, *.md) found", file=sys.stderr)
+        print(f"--jd-dir {args.jd_dir!r}: no matching JD files (*.txt, *.md, *.pdf) found", file=sys.stderr)
         return 2
 
     # Language: explicit --lang wins; batch mode defaults to "en" (no auto-detect from JD).
@@ -259,12 +260,12 @@ def _run_batch(
     batch_results: list[tuple[str, object]] = []
     for jd_path in jd_files:
         try:
-            jd_text = jd_path.read_text(encoding="utf-8")
-        except OSError as exc:
+            # Route through load_jd so PDFs are extracted the same way as single
+            # --jd (text → UTF-8 decode, PDF → pypdf). fetcher is unused for a
+            # local path but required by the signature.
+            jd_text = load_jd(str(jd_path), fetcher=fetcher)
+        except JDFileReadError as exc:
             print(f"cannot read JD file {jd_path!r}: {exc}", file=sys.stderr)
-            return 1
-        except UnicodeError as exc:
-            print(f"cannot decode JD file {jd_path!r}: {exc}", file=sys.stderr)
             return 1
         score_result = score_fit(portfolio, jd_text)
         batch_results.append((jd_path.name, score_result))

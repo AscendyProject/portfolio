@@ -14,6 +14,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   core install stays dependency-free; without it, a PDF `--jd` gives a clear,
   actionable error. A scanned/image-only PDF (no extractable text) is rejected
   rather than silently producing an empty JD (#66).
+- **`fit --jd-dir` reads PDFs too** — batch mode now globs `*.pdf` alongside
+  `*.txt`/`*.md` and extracts each through the same `load_jd` path as single
+  `--jd`, so a directory of PDF JDs is scored consistently (#70).
 
 ### Security
 - **IR-001 — refuse before the first model call:** `resolve_and_optionally_mask`
