@@ -6,7 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-06-25
+
+Job descriptions go further: PDFs work directly (single and batch), `fit` scores a
+whole directory of JDs into a ranked table, and the GHES/masking trust boundary is
+hardened.
+
 ### Added
+- **`fit` batch scoring (`--jd-dir`)** — score the grounded portfolio against every
+  JD in a directory and render a ranked, best-fit-first table (reverse fit). Mutually
+  exclusive with `--jd` (#61).
 - **PDF job-description files for `--jd`** (`resume` / `fit`) — a local `--jd` is now
   detected by its `%PDF-` signature (not the extension) and its text extracted, so a
   PDF JD works without converting first. Extraction uses `pypdf`, gated behind an
@@ -176,7 +185,8 @@ anonymize private repos before sharing.
 - Dropped the `ascendy-` prefix; the harness/repo is now `portfolio` (#8).
 - Upgraded the vendored redteam harness to 0.4.0 (#21).
 
-[Unreleased]: https://github.com/AscendyProject/portfolio/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/AscendyProject/portfolio/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/AscendyProject/portfolio/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/AscendyProject/portfolio/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AscendyProject/portfolio/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/AscendyProject/portfolio/compare/v0.2.0...v0.3.0
