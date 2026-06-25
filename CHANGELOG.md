@@ -29,6 +29,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   all github.com URLs are unchanged. This is syntax-level hardening; a DNS name
   that resolves to an internal IP is not blocked here.
 
+### Changed
+- **Rating stack-diversity taxonomy expanded; `.h` no longer double-counts C/C++**
+  (codex IR-006) — added common languages previously dropped to `other` (Vue,
+  Svelte, Objective-C, F#, Solidity, Zig, Julia, Perl, Groovy, Erlang, Nim, OCaml,
+  Elm, Crystal), so real work in them now counts toward diversity instead of
+  scoring zero. Header extensions (`.h`/`.hpp`/`.hh`/`.hxx`) are excluded from the
+  diversity COUNT (a header follows its companion source), so a `.cpp`+`.h`
+  project is C++ once, not C + C++; headers still resolve to a display language via
+  `language_for_ref`. Extension-precedence only — no content detection.
+
 ## [0.5.0] — 2026-06-24
 
 A rating that finally discriminates at the top: the grade now comes from a single

@@ -48,6 +48,33 @@ _EXT_TO_LANG: dict[str, str] = {
     ".clj": "Clojure",
     ".lua": "Lua",
     ".dart": "Dart",
+    # Additional common languages (codex IR-006 — stop dropping real work to "other").
+    # Extension-precedence only (no content detection): ambiguous extensions are
+    # pinned to their most common language — `.m`→Objective-C (not MATLAB),
+    # `.fs`→F# (not Forth), `.pl`→Perl (not Prolog), `.ml`→OCaml (not Standard ML).
+    ".vue": "Vue",
+    ".svelte": "Svelte",
+    ".m": "Objective-C",
+    ".mm": "Objective-C",
+    ".fs": "F#",
+    ".fsx": "F#",
+    ".sol": "Solidity",
+    ".zig": "Zig",
+    ".jl": "Julia",
+    ".pl": "Perl",
+    ".pm": "Perl",
+    ".groovy": "Groovy",
+    ".erl": "Erlang",
+    ".nim": "Nim",
+    ".ml": "OCaml",
+    ".mli": "OCaml",
+    ".elm": "Elm",
+    ".cr": "Crystal",
+    # C/C++ headers: mapped for display only; EXCLUDED from the diversity count
+    # via _HEADER_EXTS (a header follows its companion C/C++ source).
+    ".hpp": "C++",
+    ".hh": "C++",
+    ".hxx": "C++",
 }
 
 # Public alias — callers outside this module should use EXT_TO_LANG.
@@ -63,6 +90,12 @@ EXT_TO_LANG = _EXT_TO_LANG
 # as a 4-language polyglot). They still resolve via EXT_TO_LANG for display and
 # `language_for_ref`; only the diversity COUNT ignores them.
 _NON_CODE_LANGS: frozenset[str] = frozenset({"YAML", "JSON", "Markdown", "HTML", "CSS"})
+
+# Header extensions resolve to a display language (C / C++) but are EXCLUDED from
+# the stack-diversity COUNT: a header follows whatever C/C++ source sits beside it,
+# so `.cpp` + `.h` is C++ (one language), not C + C++ (codex IR-006). `.h` stays
+# mapped to C in _EXT_TO_LANG for `language_for_ref` display.
+_HEADER_EXTS: frozenset[str] = frozenset({".h", ".hpp", ".hh", ".hxx"})
 
 
 def language_for_ref(ref: str) -> str:
@@ -306,6 +339,8 @@ def profile(portfolio: Portfolio) -> ProfileResult:
     code_file_refs: list[str] = []
     for ref in file_refs:
         ext = _file_ext(ref)
+        if ext in _HEADER_EXTS:
+            continue  # headers follow their companion C/C++ source; not an independent language
         lang = _EXT_TO_LANG.get(ext)  # None for an unmapped extension (was "other")
         if lang is None or lang in _NON_CODE_LANGS:
             continue
