@@ -14,6 +14,9 @@ keywords = ["portfolio", "github", "developer", "grounding", "agents", "career"]
 
 [project.optional-dependencies]
 dev = ["ruff", "pytest"]
+# Optional: enables PDF job-description files for `resume`/`fit` --jd. The core
+# install carries no runtime deps; install this extra only if you pass PDFs.
+pdf = ["pypdf"]
 
 # The repo ships several sibling packages as one distribution; list them
 # explicitly so setuptools flat-layout auto-discovery doesn't bail out.
