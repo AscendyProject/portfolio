@@ -524,9 +524,9 @@ def test_batch_fetcher_passed_through(tmp_path, capsys):
     # Discriminating assertion: the web source resolves extract() to fetcher(url);
     # batch mode must have threaded the injected fetcher through SourceRequest, so
     # the fetcher is actually invoked with the normalized article URL.
-    assert fetcher_calls == [
-        "https://blog.example.com/post"
-    ], "batch mode must thread the injected fetcher through to the web source resolve path"
+    assert fetcher_calls == ["https://blog.example.com/post"], (
+        "batch mode must thread the injected fetcher through to the web source resolve path"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -674,9 +674,9 @@ def test_lang_ko_no_english_leak_in_batch_table(tmp_path, capsys):
         ko_val = LANGS["ko"][key]
         if en_val == ko_val:
             continue  # language-neutral (e.g. "JD" is same in both)
-        assert (
-            en_val not in captured.out
-        ), f"English UI string LANGS['en']['{key}']={en_val!r} leaked into ko batch render"
+        assert en_val not in captured.out, (
+            f"English UI string LANGS['en']['{key}']={en_val!r} leaked into ko batch render"
+        )
 
     # Korean column headers must appear
     assert LANGS["ko"]["batch_col_grade"] in captured.out
@@ -771,6 +771,7 @@ def test_batch_picks_up_and_extracts_pdf_jd(tmp_path, capsys, monkeypatch):
 
     class PdfReader:
         def __init__(self, _stream) -> None:
+            self.is_encrypted = False
             self.pages = [_Page()]
 
     module.PdfReader = PdfReader  # type: ignore[attr-defined]

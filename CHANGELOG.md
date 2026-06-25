@@ -40,6 +40,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ValueError` before any `gh` invocation. Well-formed external DNS GHES hosts and
   all github.com URLs are unchanged. This is syntax-level hardening; a DNS name
   that resolves to an internal IP is not blocked here.
+- **PDF `--jd` input limits** (codex IR-001) — a PDF/file job description is now
+  bounded against resource exhaustion: file size ≤ 20 MiB (checked via `stat`
+  before the bytes are read), ≤ 500 pages, ≤ 2M extracted characters (each page
+  rejected immediately if it would exceed the cap, before accumulation), and
+  encrypted PDFs are refused. A malicious or malformed local PDF can no longer
+  drive memory/CPU exhaustion. (`pypdf`'s `extract_text()` is not streamable, so a
+  single page is still materialized before measurement; full subprocess/timeout
+  isolation is a documented follow-up.)
 
 ### Changed
 - **Rating stack-diversity taxonomy expanded; `.h` no longer double-counts C/C++**

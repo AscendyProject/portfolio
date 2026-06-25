@@ -28,7 +28,7 @@ from portfolio.jd_source import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-def _install_fake_pypdf(monkeypatch, *, pages: list[str] | None = None, raises: bool = False):
+def _install_fake_pypdf(monkeypatch, *, pages: list[str] | None = None, raises: bool = False, encrypted: bool = False):
     import types
 
     module = types.ModuleType("pypdf")
@@ -44,6 +44,7 @@ def _install_fake_pypdf(monkeypatch, *, pages: list[str] | None = None, raises: 
         def __init__(self, _stream) -> None:
             if raises:
                 raise ValueError("malformed PDF")
+            self.is_encrypted = encrypted
             self.pages = [_Page(t) for t in (pages or [])]
 
     module.PdfReader = PdfReader  # type: ignore[attr-defined]
@@ -318,6 +319,39 @@ def test_extract_pdf_text_malformed_pdf_wrapped(monkeypatch):
     _install_fake_pypdf(monkeypatch, raises=True)
     with pytest.raises(JDFileReadError, match="could not read the PDF"):
         _extract_pdf_text(b"%PDF-1.4 ...")
+
+
+def test_pdf_encrypted_rejected_ir001(monkeypatch):
+    """An encrypted PDF --jd is refused with an actionable error (codex IR-001)."""
+    _install_fake_pypdf(monkeypatch, pages=["secret"], encrypted=True)
+    with pytest.raises(JDFileReadError, match="encrypted"):
+        _extract_pdf_text(b"%PDF-1.4 ...")
+
+
+def test_pdf_too_many_pages_rejected_ir001(monkeypatch):
+    """A PDF --jd exceeding the page cap is refused (resource limit, codex IR-001)."""
+    monkeypatch.setattr("portfolio.jd_source._PDF_MAX_PAGES", 2)
+    _install_fake_pypdf(monkeypatch, pages=["a", "b", "c"])  # 3 > 2
+    with pytest.raises(JDFileReadError, match="too many pages"):
+        _extract_pdf_text(b"%PDF-1.4 ...")
+
+
+def test_pdf_text_cap_rejected_ir001(monkeypatch):
+    """Extracted text exceeding the char cap is refused (resource limit, codex IR-001)."""
+    monkeypatch.setattr("portfolio.jd_source._PDF_MAX_TEXT_CHARS", 10)
+    _install_fake_pypdf(monkeypatch, pages=["x" * 11])
+    with pytest.raises(JDFileReadError, match="char limit"):
+        _extract_pdf_text(b"%PDF-1.4 ...")
+
+
+def test_jd_file_too_large_rejected_ir001(tmp_path, monkeypatch):
+    """A --jd file larger than the byte cap is refused before its bytes are read
+    (codex IR-001 — preflight size check via stat, not after loading into memory)."""
+    monkeypatch.setattr("portfolio.jd_source._JD_MAX_BYTES", 16)
+    big = tmp_path / "jd.txt"
+    big.write_text("x" * 100, encoding="utf-8")
+    with pytest.raises(JDFileReadError, match="too large"):
+        load_jd(str(big), fetcher=lambda u: "")
 
 
 def test_extract_pdf_text_missing_pypdf_gives_actionable_error(monkeypatch):
