@@ -13,7 +13,7 @@ authors = [{ name = "AscendyProject" }]
 keywords = ["portfolio", "github", "developer", "grounding", "agents", "career"]
 
 [project.optional-dependencies]
-dev = ["ruff", "pytest"]
+dev = ["ruff", "pytest", "pypdf"]
 # Optional: enables PDF job-description files for `resume`/`fit` --jd. The core
 # install carries no runtime deps; install this extra only if you pass PDFs.
 pdf = ["pypdf"]

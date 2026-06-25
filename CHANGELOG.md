@@ -50,6 +50,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   isolation is a documented follow-up.)
 
 ### Changed
+- **`fit --jd-dir` validates every JD before building** (codex IR-002) — batch mode
+  now reads/validates all JD files up front, so a bad / encrypted / oversized JD
+  fails fast with exit 2 instead of after the expensive portfolio build; the loaded
+  text is reused for scoring (no double read).
 - **Rating stack-diversity taxonomy expanded; `.h` no longer double-counts C/C++**
   (codex IR-006) — added common languages previously dropped to `other` (Vue,
   Svelte, Objective-C, F#, Solidity, Zig, Julia, Perl, Groovy, Erlang, Nim, OCaml,
