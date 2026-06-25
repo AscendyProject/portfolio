@@ -149,6 +149,31 @@ def extract_repo_names(portfolio: Portfolio) -> set[str]:
     return found
 
 
+def _ref_host(ref: str) -> str | None:
+    """Return the host label if ``ref`` encodes a GHES-style ``host/owner/repo…``
+    reference, else ``None``.
+
+    A GHES ref has the form ``host/owner/repo#<n>`` or ``host/owner/repo:<path>``
+    — three or more slash-separated segments before the ``#`` / ``:`` separator.
+    A github.com-origin ref has the form ``owner/repo#<n>`` or
+    ``owner/repo:<path>`` — exactly two segments; those return ``None``.
+    Single-segment bare refs (e.g. ``PR#5``) also return ``None``.
+
+    This uses the same segment-counting convention the rest of the masking layer
+    uses for ref parsing (``_parse_ref`` / ``_PR_REF_RE`` / ``_FILE_REF_RE``):
+    a two-segment prefix is always ``owner/repo``; a three-or-more-segment prefix
+    carries a leading host label.
+    """
+    for sep in ("#", ":"):
+        if sep in ref:
+            prefix = ref.split(sep, 1)[0]
+            parts = [p for p in prefix.split("/") if p]
+            if len(parts) >= 3:
+                return parts[0]  # first segment is the host label
+            return None  # two-segment owner/repo or bare single-segment ref
+    return None  # no # or : separator — not a structured repo ref
+
+
 def assert_maskable(portfolio: Portfolio) -> None:
     """Fail closed when --mask-private cannot reliably mask this portfolio.
 
@@ -160,6 +185,9 @@ def assert_maskable(portfolio: Portfolio) -> None:
     is worse than refusing the run. Raises MaskingError for the first non-
     maskable host found.
 
+    Checks both ``ev.url`` (URL-based host) and ``ev.ref`` (ref-encoded host
+    label for url-less GHES evidence — IR-003).
+
     Only repo-artifact evidence (PRs, files, commits, …) is checked. `article`
     evidence comes from `--source-type web`: its URL is arbitrary public content,
     not a repo, and carries no GitHub repo name to mask — so a non-github.com
@@ -168,17 +196,42 @@ def assert_maskable(portfolio: Portfolio) -> None:
     for ev in portfolio.evidence:
         if ev.kind == "article":
             continue  # web article URL is public content, not a maskable repo
-        if not ev.url:
-            continue
-        try:
-            host = urlparse(ev.url).hostname
-        except ValueError:
-            continue  # an unparseable URL yields no repo to mask anyway
-        if host and host not in _MASKABLE_HOSTS:
+
+        # Check ev.url for a non-github.com host.
+        if ev.url:
+            try:
+                host = urlparse(ev.url).hostname
+            except ValueError:
+                host = None  # an unparseable URL yields no repo to mask anyway
+            if host and host not in _MASKABLE_HOSTS:
+                raise MaskingError(
+                    f"--mask-private does not support host {host!r} (only github.com): "
+                    f"private repos on GitHub Enterprise Server cannot be reliably masked, "
+                    f"so the run is refused rather than risk emitting them unmasked. "
+                    f"Re-run without --mask-private."
+                )
+
+        # IR-003: also check the structured ref for a host label.
+        # Evidence with an empty url but a ref of the form host/owner/repo#n
+        # (three or more slash-segments before # or :) carries a host prefix
+        # and must be refused, even if the host happens to be github.com.
+        # Rationale: the masking relabel layer (_parse_ref / _rewrite_ref) only
+        # handles bare two-segment owner/repo refs; a host-qualified ref cannot
+        # be discovered by extract_repo_names or relabeled by mask_portfolio, so
+        # silently passing the guard would cause the ref to leak unmasked.
+        # Failing closed for ANY non-None ref_host (including github.com) is
+        # therefore correct — bare owner/repo refs (ref_host=None) are the only
+        # shape the masking layer can actually relabel.
+        # IR-004 RESIDUAL: free-text GHES identifiers in ev.detail / ev.context /
+        # claim.text that have no structured ref/url are NOT covered here — they
+        # are handled by the IR-004 real-GHES-masking task.
+        ref_host = _ref_host(ev.ref)
+        if ref_host is not None:
             raise MaskingError(
-                f"--mask-private does not support host {host!r} (only github.com): "
-                f"private repos on GitHub Enterprise Server cannot be reliably masked, "
-                f"so the run is refused rather than risk emitting them unmasked. "
+                f"--mask-private does not support host-qualified ref {ev.ref!r} "
+                f"(host {ref_host!r}): only bare owner/repo refs can be discovered "
+                f"and relabeled by the masking layer; a host-qualified ref cannot be "
+                f"masked, so the run is refused rather than risk emitting it unmasked. "
                 f"Re-run without --mask-private."
             )
 

@@ -15,6 +15,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   actionable error. A scanned/image-only PDF (no extractable text) is rejected
   rather than silently producing an empty JD (#66).
 
+### Security
+- **IR-001 — refuse before the first model call:** `resolve_and_optionally_mask`
+  now runs the masking guard (`assert_maskable`) on extracted evidence **before**
+  any call to the narrate runner or synthesis runner. Previously the guard ran
+  after `narrate`, meaning a private GHES repo's raw evidence could be sent to the
+  model before the run was refused. The new ordering is:
+  `extract → assert_maskable → narrate → ground → mask → synthesize`. When the
+  guard raises `MaskingError` no model call has been made; verified by a
+  counting-runner test that asserts call-count == 0 for both runners.
+- **IR-003 — close the ref-based GHES bypass:** `assert_maskable` now also
+  inspects the host label encoded in `ev.ref` in addition to `ev.url`. Evidence
+  with an empty `url` but a GHES-style ref (`ghe.host.com/owner/repo#n` — three or
+  more segments before `#` / `:`) is refused with `MaskingError`, so there is no
+  url-less bypass of the fail-closed guard. The `article` exemption is preserved.
+- **GHES host parsing hardened against IP-literal and authority-spoofing inputs**
+  (IR-002 / IR-005) — `parse_github_source` now rejects IP-literal hosts in any
+  notation (canonical IPv4, legacy short-form, octal, hex, mixed-base, and IPv6
+  literals), userinfo in the authority (`user@host`, `github.com@evil.example`),
+  and explicit ports (numeric, empty, nonnumeric, out-of-range), all with a
+  `ValueError` before any `gh` invocation. Well-formed external DNS GHES hosts and
+  all github.com URLs are unchanged. This is syntax-level hardening; a DNS name
+  that resolves to an internal IP is not blocked here.
+
 ## [0.5.0] — 2026-06-24
 
 A rating that finally discriminates at the top: the grade now comes from a single

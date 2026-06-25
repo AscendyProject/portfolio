@@ -120,6 +120,12 @@ LANGS: dict[str, dict] = {
         "letter_closing": "Sincerely,",
         # inline refs label used by highlight bullets and reasoning bullets (show_refs=True)
         "refs_inline_label": "refs",
+        # fit/render.py — batch ranked-table column headers
+        "batch_col_jd": "JD",
+        "batch_col_grade": "Grade",
+        "batch_col_score": "Score",
+        "batch_col_coverage": "Coverage%",
+        "batch_col_top_gaps": "Top Gaps",
     },
     "ko": {
         "name": "Korean",
@@ -220,6 +226,12 @@ LANGS: dict[str, dict] = {
         "letter_closing": "감사합니다,",
         # inline refs label used by highlight bullets and reasoning bullets (show_refs=True)
         "refs_inline_label": "참조",
+        # fit/render.py — batch ranked-table column headers
+        "batch_col_jd": "JD",
+        "batch_col_grade": "등급",
+        "batch_col_score": "점수",
+        "batch_col_coverage": "커버리지%",
+        "batch_col_top_gaps": "주요 격차",
     },
 }
 

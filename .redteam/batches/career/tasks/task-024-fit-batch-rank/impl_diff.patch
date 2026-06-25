@@ -1,0 +1,1350 @@
+diff --git a/.claude/commands/fit.md b/.claude/commands/fit.md
+index c1a363f..44d8efb 100644
+--- a/.claude/commands/fit.md
++++ b/.claude/commands/fit.md
+@@ -1,6 +1,6 @@
+ ---
+ description: Assess how well a developer's grounded portfolio matches a job description (runs python -m fit).
+-argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] --jd <path-or-url> [--lang en|ko] [--mask-private] [--out <file>]"
++argument-hint: "[github <url> <author>] | [github-author <author>] | [web <url> <author>] | [portfolio <file.json>] --jd <path-or-url> | --jd-dir <dir> [--lang en|ko] [--mask-private] [--out <file>]"
+ ---
+ 
+ The user wants a **grounded JD fit assessment** — a deterministic grade (S/A/B/C/D)
+@@ -25,19 +25,34 @@ Arguments (may be empty): `$ARGUMENTS`
+      for web, or the path to a `.json` file for portfolio.
+    - **author** — the GitHub handle whose merged PRs are the evidence (github /
+      github-author), or the subject the assessment is for (web). Not used for `portfolio`.
+-   - **jd path or URL** — filesystem path to a plain-text job description file, or an `http(s)` URL to a job posting page (required). When a URL is supplied the page is fetched and its article text is used as the JD.
+-   - optionally **--lang `en`|`ko`** to set the output language. When omitted, the
+-     language is auto-detected from the JD text (Hangul-dominant → `ko`, Latin-dominant
+-     → `en`). An explicit `--lang` always wins over auto-detection.
++   - **jd input — exactly one of:**
++     - `--jd <path-or-url>` — filesystem path to a plain-text job description file, or
++       an `http(s)` URL to a job posting page. When a URL is supplied the page is fetched
++       and its article text is used as the JD.
++     - `--jd-dir <dir>` — **batch mode**: score the same portfolio against every `*.txt`
++       and `*.md` file (top-level only; case-sensitive suffix match) found in `<dir>`.
++       Files are processed in sorted order (Python `sorted()` on basename). The output is
++       a ranked Markdown table (`JD | Grade | Score | Coverage% | Top Gaps`) sorted
++       best-first (Score ↓, Coverage% ↓, JD basename ↑). The portfolio is built ONCE
++       regardless of how many JDs are in the directory. `--jd` and `--jd-dir` are
++       **mutually exclusive**; supplying both or neither exits with code 2.
++       If the directory contains no matching files, the CLI exits with code 2 (no crash).
++   - optionally **--lang `en`|`ko`** to set the output language.
++     - **Single JD (`--jd`)**: when omitted, the language is auto-detected from the JD
++       text (Hangul-dominant → `ko`, Latin-dominant → `en`).
++     - **Batch (`--jd-dir`)**: when omitted, the default is **`en`**. There is no
++       auto-detection from JD contents in batch mode. An explicit `--lang` always wins.
+      Supported: `en` (English), `ko` (Korean).
+    - optionally **--out <file>** if the user wants the Markdown written to a file
+-     instead of shown inline.
++     instead of shown inline. In batch mode, the single ranked table is written to this
++     file.
+    - optionally **--mask-private** to anonymize private GitHub repo names in the output
+      before sharing. Detected from structured fields only; semantic project names are
+      NOT masked. A `masked N private repo(s)` summary is printed to stderr.
+    - optionally **--show-refs** to include grounding evidence refs in the rendered
+-     Markdown fit assessment. By default refs are hidden (grounding still runs; only
+-     display is suppressed). The stderr grounding summary is unaffected by this flag.
++     Markdown fit assessment (single-JD mode only). By default refs are hidden (grounding
++     still runs; only display is suppressed). The stderr grounding summary is unaffected
++     by this flag.
+ 
+ 2. **Run the CLI** with exactly those values (pass each as a separate argument —
+    never assemble a shell string from the user's input, never use command
+diff --git a/README.md b/README.md
+index 0006edd..5b12cb5 100644
+--- a/README.md
++++ b/README.md
+@@ -152,6 +152,24 @@ local filesystem path to a plain-text file **or** an `http(s)` URL to a job post
+ > developer's grounded evidence covers the JD's keywords; depth of experience,
+ > years, or domain judgment are not modeled.
+ 
++**Batch mode (`--jd-dir`):** pass a directory instead of a single JD file to score
++the same portfolio against every `*.txt` and `*.md` file in the directory (top-level
++only) and emit a ranked Markdown table (`JD | Grade | Score | Coverage% | Top Gaps`)
++sorted best-first (Score ↓, Coverage% ↓, JD basename ↑). The portfolio is built
++**once**; only the scoring step repeats per JD.
++
++```
++python -m fit --source-type github --source <url> --author <handle> --jd-dir ./jd-files/
++```
++
++`--jd` and `--jd-dir` are mutually exclusive; supplying both or neither exits with
++code 2 and a one-line error message. An empty directory (or one with no `*.txt` /
++`*.md` files) also exits with code 2.
++
++**Batch-mode `--lang` default:** when `--jd-dir` is used and `--lang` is omitted,
++the output language is `en`. There is no auto-detection from JD contents in batch
++mode. An explicit `--lang ko` (or `--lang en`) overrides the default.
++
+ The `/fit` slash command is the interactive front door; `--out <file>` writes to
+ a file instead of stdout.
+ 
+diff --git a/fit/cli.py b/fit/cli.py
+index 268a9f5..46352c9 100644
+--- a/fit/cli.py
++++ b/fit/cli.py
+@@ -18,7 +18,7 @@ from pathlib import Path
+ 
+ import portfolio.i18n as i18n
+ from fit.grade import GraderRunner, bounded_grade, default_grader_runner
+-from fit.render import render_fit
++from fit.render import render_fit, render_fit_batch
+ from fit.score import score_fit
+ from portfolio.extract import extract_merged_prs
+ from portfolio.i18n import detect_language
+@@ -41,7 +41,12 @@ def _build_parser() -> argparse.ArgumentParser:
+         help="source URL (a GitHub repo URL, or an article URL for --source-type web)",
+     )
+     parser.add_argument("--author", help="GitHub handle or subject name")
+-    parser.add_argument("--jd", required=True, help="path to the job description file (plain text)")
++    parser.add_argument("--jd", default=None, help="path or http(s) URL to the job description file (plain text)")
++    parser.add_argument(
++        "--jd-dir",
++        default=None,
++        help="directory of JD files (*.txt, *.md) to score in batch; mutually exclusive with --jd",
++    )
+     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
+     parser.add_argument(
+         "--mask-private", action="store_true", default=False, help="anonymize private GitHub repo names in output"
+@@ -75,6 +80,21 @@ def run(
+     except SystemExit as exc:
+         return int(exc.code) if exc.code is not None else 2
+ 
++    # Mutual-exclusion and required check for --jd / --jd-dir.
++    if args.jd is not None and args.jd_dir is not None:
++        print("--jd and --jd-dir are mutually exclusive; supply exactly one", file=sys.stderr)
++        return 2
++    if args.jd is None and args.jd_dir is None:
++        print("one of --jd or --jd-dir is required", file=sys.stderr)
++        return 2
++
++    # ── Batch mode (--jd-dir) ─────────────────────────────────────────────────
++    if args.jd_dir is not None:
++        return _run_batch(
++            args, extractor=extractor, runner=runner, fetcher=fetcher, visibility_lookup=visibility_lookup
++        )
++
++    # ── Single-JD mode (--jd) — original path, byte-identical output ─────────
+     # Load the JD (file path or http(s) URL) — fail early with a clean error.
+     try:
+         jd_text = load_jd(args.jd, fetcher=fetcher)
+@@ -168,6 +188,105 @@ def run(
+     return 0
+ 
+ 
++def _run_batch(
++    args,
++    *,
++    extractor,
++    runner,
++    fetcher,
++    visibility_lookup,
++) -> int:
++    """Execute batch mode: score the portfolio against every JD in --jd-dir."""
++    jd_dir = Path(args.jd_dir)
++
++    # Collect matching files non-recursively; accepted suffixes are .txt and .md (case-sensitive).
++    _ACCEPTED_SUFFIXES = {".txt", ".md"}
++    try:
++        entries = list(jd_dir.iterdir())
++    except OSError:
++        entries = []
++
++    jd_files = sorted(
++        [p for p in entries if p.is_file() and p.suffix in _ACCEPTED_SUFFIXES],
++        key=lambda p: p.name,
++    )
++
++    if not jd_files:
++        print(f"--jd-dir {args.jd_dir!r}: no matching JD files (*.txt, *.md) found", file=sys.stderr)
++        return 2
++
++    # Language: explicit --lang wins; batch mode defaults to "en" (no auto-detect from JD).
++    lang = args.lang if args.lang is not None else "en"
++
++    # Resolve the source (validation/parse only — no extraction yet).
++    try:
++        resolved = resolve_source(
++            args.source_type,
++            SourceRequest(source=args.source, author=args.author, extractor=extractor, fetcher=fetcher),
++        )
++    except UnsupportedSourceError as exc:
++        print(str(exc), file=sys.stderr)
++        return 2
++    except ValueError as exc:
++        print(f"invalid source: {exc}", file=sys.stderr)
++        return 2
++
++    # Build the portfolio ONCE.
++    try:
++        result, n_masked = resolve_and_optionally_mask(
++            resolved,
++            subject=resolved.subject,
++            runner=runner,
++            mask_private=args.mask_private,
++            synthesis_runner=None,
++            visibility_lookup=visibility_lookup,
++            lang=lang,
++        )
++    except Exception as exc:
++        print(f"failed to build portfolio: {exc}", file=sys.stderr)
++        return 1
++
++    if args.mask_private:
++        print(f"masked {n_masked} private repo(s)", file=sys.stderr)
++
++    portfolio = result.portfolio
++
++    # Score per JD; collect (basename, ScoreResult) pairs.
++    batch_results: list[tuple[str, object]] = []
++    for jd_path in jd_files:
++        try:
++            jd_text = jd_path.read_text(encoding="utf-8")
++        except OSError as exc:
++            print(f"cannot read JD file {jd_path!r}: {exc}", file=sys.stderr)
++            return 1
++        except UnicodeError as exc:
++            print(f"cannot decode JD file {jd_path!r}: {exc}", file=sys.stderr)
++            return 1
++        score_result = score_fit(portfolio, jd_text)
++        batch_results.append((jd_path.name, score_result))
++
++    # Grounding summary → stderr, exactly once.
++    grounding = result.grounding
++    print(
++        f"grounded: {len(grounding.grounded)}  "
++        f"rejected: {len(grounding.rejected)}  "
++        f"needs-confirmation: {len(grounding.needs_confirmation)}",
++        file=sys.stderr,
++    )
++
++    markdown = render_fit_batch(batch_results, lang=lang)
++
++    if args.out:
++        try:
++            Path(args.out).write_text(markdown, encoding="utf-8")
++        except OSError as exc:
++            print(f"failed to write --out file {args.out!r}: {exc}", file=sys.stderr)
++            return 1
++    else:
++        emit_markdown(markdown)
++    return 0
++
++
+ def main() -> None:
+     """Console entrypoint: run with live services and exit with the result code."""
+     sys.exit(run(sys.argv[1:]))
+diff --git a/fit/render.py b/fit/render.py
+index 3e49b75..e463bb5 100644
+--- a/fit/render.py
++++ b/fit/render.py
+@@ -10,6 +10,25 @@ from fit.score import ScoreResult
+ from portfolio.i18n import LANGS
+ from portfolio.render import _escape
+ 
++_TOP_GAPS_N = 5
++
++
++def _escape_cell(text: str) -> str:
++    """Escape a value for use inside a Markdown table cell.
++
++    Handles:
++    - Carriage returns (\\r): replaced with a single space before delegating
++    - Newlines (\\n): delegated to portfolio.render._escape (replaced with space)
++    - Markdown-significant characters (`` ` [ ] \\ * _ # < > ``): delegated to _escape
++    - Pipe (|): backslash-escaped as \\|
++    """
++    # Replace \r first so _escape sees spaces not CR
++    text = text.replace("\r", " ")
++    # Delegate to the existing escaper for \n and Markdown specials
++    text = _escape(text)
++    # Escape pipes (table cell delimiter not handled by portfolio.render._escape)
++    return text.replace("|", "\\|")
++
+ 
+ def render_fit(
+     score_result: ScoreResult,
+@@ -93,3 +112,59 @@ def render_fit(
+     lines.append("")
+ 
+     return "\n".join(lines)
++
++
++def render_fit_batch(
++    results: list[tuple[str, ScoreResult]],
++    lang: str = "en",
++) -> str:
++    """Render a ranked Markdown table of batch JD scoring results.
++
++    Columns (in order): JD, Grade, Score, Coverage%, Top Gaps.
++    Rows are sorted: Score descending, Coverage% descending, JD basename ascending.
++    Score is the band midpoint (min + max) // 2.
++    Top Gaps is the first 5 elements of sorted(score_result.gaps).
++    Column headers come from LANGS[lang]; no hardcoded English UI strings.
++
++    Cell values are escaped with _escape_cell (handles |, \\r, \\n, Markdown specials).
++    UI strings (none_notice, column headers) are rendered directly without escaping.
++    """
++    strings = LANGS[lang]
++
++    col_jd = strings["batch_col_jd"]
++    col_grade = strings["batch_col_grade"]
++    col_score = strings["batch_col_score"]
++    col_coverage = strings["batch_col_coverage"]
++    col_top_gaps = strings["batch_col_top_gaps"]
++
++    def _sort_key(item: tuple[str, ScoreResult]) -> tuple:
++        basename, sr = item
++        score = (sr.band[0] + sr.band[1]) // 2
++        return (-score, -sr.coverage_pct, basename)
++
++    sorted_results = sorted(results, key=_sort_key)
++
++    header = f"| {col_jd} | {col_grade} | {col_score} | {col_coverage} | {col_top_gaps} |"
++    sep = (
++        f"|{'-' * (len(col_jd) + 2)}"
++        f"|{'-' * (len(col_grade) + 2)}"
++        f"|{'-' * (len(col_score) + 2)}"
++        f"|{'-' * (len(col_coverage) + 2)}"
++        f"|{'-' * (len(col_top_gaps) + 2)}|"
++    )
++
++    lines = [header, sep]
++
++    for basename, sr in sorted_results:
++        score = (sr.band[0] + sr.band[1]) // 2
++        coverage_str = f"{sr.coverage_pct:.0f}%"
++
++        top_gap_tokens = sorted(sr.gaps)[:_TOP_GAPS_N]
++        if top_gap_tokens:
++            gaps_str = ", ".join(_escape_cell(g) for g in top_gap_tokens)
++        else:
++            gaps_str = strings["none_notice"]
++
++        lines.append(f"| {_escape_cell(basename)} | {_escape_cell(sr.grade)} | {score} | {coverage_str} | {gaps_str} |")
++
++    return "\n".join(lines) + "\n"
+diff --git a/portfolio/i18n.py b/portfolio/i18n.py
+index e24b9e8..410c1fb 100644
+--- a/portfolio/i18n.py
++++ b/portfolio/i18n.py
+@@ -114,6 +114,12 @@ LANGS: dict[str, dict] = {
+         "letter_closing": "Sincerely,",
+         # inline refs label used by highlight bullets and reasoning bullets (show_refs=True)
+         "refs_inline_label": "refs",
++        # fit/render.py — batch ranked-table column headers
++        "batch_col_jd": "JD",
++        "batch_col_grade": "Grade",
++        "batch_col_score": "Score",
++        "batch_col_coverage": "Coverage%",
++        "batch_col_top_gaps": "Top Gaps",
+     },
+     "ko": {
+         "name": "Korean",
+@@ -208,6 +214,12 @@ LANGS: dict[str, dict] = {
+         "letter_closing": "감사합니다,",
+         # inline refs label used by highlight bullets and reasoning bullets (show_refs=True)
+         "refs_inline_label": "참조",
++        # fit/render.py — batch ranked-table column headers
++        "batch_col_jd": "JD",
++        "batch_col_grade": "등급",
++        "batch_col_score": "점수",
++        "batch_col_coverage": "커버리지%",
++        "batch_col_top_gaps": "주요 격차",
+     },
+ }
+ 
+diff --git a/tests/golden/fit_single_jd/stderr.txt b/tests/golden/fit_single_jd/stderr.txt
+new file mode 100644
+index 0000000..a43190e
+--- /dev/null
++++ b/tests/golden/fit_single_jd/stderr.txt
+@@ -0,0 +1 @@
++grounded: 1  rejected: 0  needs-confirmation: 0
+diff --git a/tests/golden/fit_single_jd/stdout.md b/tests/golden/fit_single_jd/stdout.md
+new file mode 100644
+index 0000000..6047fb2
+--- /dev/null
++++ b/tests/golden/fit_single_jd/stdout.md
+@@ -0,0 +1,29 @@
++# Fit Assessment — Grade B
++
++**Score:** 80 / 100  (band: 70–84)
++
++**JD Coverage:** 67%
++
++## Covered Requirements
++
++- `backend`
++- `python`
++
++## Gaps
++
++- `engineer`
++
++## Grounded Reasoning
++
++- solid match
++
++## Grade Rubric
++
++| Grade | Coverage% | Score Band |
++|-------|-----------|------------|
++| S     | ≥90%      | 96–100     |
++| A     | ≥75%      | 85–95      |
++| B     | ≥55%      | 70–84      |
++| C     | ≥35%      | 55–69      |
++| D     | <35%      | 0–54       |
++
+diff --git a/tests/test_fit_batch.py b/tests/test_fit_batch.py
+new file mode 100644
+index 0000000..290f3e1
+--- /dev/null
++++ b/tests/test_fit_batch.py
+@@ -0,0 +1,944 @@
++"""Tests for fit batch mode (--jd-dir) and related guarantees.
++
++Each test traces to a Done-when item in outcome.md via its docstring.
++All tests inject fake extractor, runner, fetcher, grader_runner — no live services.
++"""
++
++from __future__ import annotations
++
++import json
++import sys
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++
++from portfolio.model import Evidence  # noqa: E402
++from fit.cli import run  # noqa: E402
++from fit.score import ScoreResult, GRADE_BANDS  # noqa: E402
++from fit.render import _escape_cell, render_fit_batch  # noqa: E402
++from portfolio.i18n import LANGS  # noqa: E402
++
++
++# ---------------------------------------------------------------------------
++# Shared fakes (mirror test_fit.py)
++# ---------------------------------------------------------------------------
++
++
++def _fake_extractor(*, repo: str, author: str) -> list[Evidence]:
++    return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
++
++
++def _fake_runner(prompt: str) -> str:
++    return json.dumps([{"text": "Built a python backend service", "evidence_refs": ["PR#1"], "confidence": 0.9}])
++
++
++def _make_grader_runner(score: int = 80):
++    reasoning = [{"text": "solid match", "evidence_refs": ["PR#1"]}]
++
++    def grader(prompt: str, *, temperature: float = 0) -> str:
++        return json.dumps({"score": score, "reasoning": reasoning})
++
++    return grader
++
++
++def _base_batch_argv(jd_dir: str, lang: str | None = None, out: str | None = None) -> list[str]:
++    argv = [
++        "--source-type",
++        "github",
++        "--source",
++        "https://github.com/owner/repo",
++        "--author",
++        "alice",
++        "--jd-dir",
++        jd_dir,
++    ]
++    if lang is not None:
++        argv += ["--lang", lang]
++    if out is not None:
++        argv += ["--out", out]
++    return argv
++
++
++def _base_single_argv(jd_path: str, lang: str | None = None) -> list[str]:
++    argv = [
++        "--source-type",
++        "github",
++        "--source",
++        "https://github.com/owner/repo",
++        "--author",
++        "alice",
++        "--jd",
++        jd_path,
++    ]
++    if lang is not None:
++        argv += ["--lang", lang]
++    return argv
++
++
++# ---------------------------------------------------------------------------
++# Done-when: happy path end-to-end with N JDs
++# ---------------------------------------------------------------------------
++
++
++def test_jd_dir_happy_path(tmp_path, capsys):
++    """'python -m fit --source-type … --source … --author … --jd-dir <dir>' runs
++    end-to-end and exits 0 when at least one *.txt or *.md file is in <dir>;
++    stdout is a Markdown ranked table with N rows in best-first order."""
++    (tmp_path / "alpha.txt").write_text("python backend engineer", encoding="utf-8")
++    (tmp_path / "beta.md").write_text("java spring developer", encoding="utf-8")
++
++    code = run(
++        _base_batch_argv(str(tmp_path), lang="en"),
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(80),
++    )
++    captured = capsys.readouterr()
++    assert code == 0
++    out = captured.out
++    # Markdown table: header + separator + 2 data rows
++    rows = [line for line in out.splitlines() if line.startswith("|")]
++    assert len(rows) >= 3  # header + sep + 2 data rows
++    # Both filenames appear in the table
++    assert "alpha.txt" in out
++    assert "beta.md" in out
++
++
++# ---------------------------------------------------------------------------
++# Done-when: extension filter
++# ---------------------------------------------------------------------------
++
++
++def test_jd_dir_extension_filter(tmp_path, capsys):
++    """'--jd-dir scans <dir> non-recursively; accepts ONLY .txt and .md (case-sensitive);
++    ignores .json, .txt.bak, and subdirectories.'"""
++    (tmp_path / "job.txt").write_text("python backend", encoding="utf-8")
++    (tmp_path / "other.md").write_text("java spring", encoding="utf-8")
++    (tmp_path / "notes.json").write_text('{"role": "engineer"}', encoding="utf-8")
++    (tmp_path / "job.txt.bak").write_text("python backend", encoding="utf-8")
++    subdir = tmp_path / "subdir"
++    subdir.mkdir()
++    (subdir / "inner.txt").write_text("go microservices", encoding="utf-8")
++
++    code = run(
++        _base_batch_argv(str(tmp_path), lang="en"),
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(80),
++    )
++    captured = capsys.readouterr()
++    assert code == 0
++    out = captured.out
++    # Only job.txt and other.md are scored
++    rows = [line for line in out.splitlines() if line.startswith("|") and not line.startswith("|---")]
++    # header is a pipe row too — filter it by checking for column header text
++    header_keywords = {"Grade", "등급", "JD"}
++    actual_data = [r for r in rows if not any(kw in r for kw in header_keywords) and "---" not in r]
++    assert len(actual_data) == 2
++    assert "notes.json" not in out
++    assert "txt.bak" not in out
++    # The subdir inner.txt should not appear (non-recursive)
++    lines_with_inner = [ln for ln in out.splitlines() if "inner" in ln]
++    assert not lines_with_inner
++
++
++# ---------------------------------------------------------------------------
++# Done-when: filename tiebreak (score + coverage% tie, basename ascending)
++# ---------------------------------------------------------------------------
++
++
++def test_jd_dir_tiebreak_by_basename(tmp_path):
++    """'Table rows are sorted: primary key Score descending, secondary key Coverage%
++    descending, tertiary key JD basename ascending. A test with hand-crafted
++    ScoreResults exercises all three tiers of the tiebreak.'
++
++    Three distinct cases verified:
++    1. Different scores → primary key (Score) determines rank.
++    2. Equal scores, different coverage% → secondary key (Coverage%) determines rank.
++    3. Equal scores, equal coverage% → tertiary key (basename) determines rank.
++    """
++    # Tier 1 winner: highest score (A band midpoint 90 > B midpoint 77)
++    sr_score_winner = ScoreResult(grade="A", band=(85, 95), coverage_pct=50.0, covered={}, gaps=set())
++
++    # Tier 2 winner: same score as tier2_loser (B midpoint 77), but higher coverage%
++    sr_coverage_winner = ScoreResult(grade="B", band=(70, 84), coverage_pct=75.0, covered={}, gaps=set())
++    sr_coverage_loser = ScoreResult(grade="B", band=(70, 84), coverage_pct=40.0, covered={}, gaps=set())
++
++    # Tier 3: same score AND same coverage% — basename ascending decides
++    sr_name_aaa = ScoreResult(grade="C", band=(55, 69), coverage_pct=30.0, covered={}, gaps=set())
++    sr_name_zzz = ScoreResult(grade="C", band=(55, 69), coverage_pct=30.0, covered={}, gaps=set())
++
++    results = [
++        ("scorewinner.txt", sr_score_winner),  # rank 1 by score
++        ("covwinner.txt", sr_coverage_winner),  # rank 2 by coverage%
++        ("covloser.txt", sr_coverage_loser),  # rank 3 by coverage%
++        ("zzz.txt", sr_name_zzz),  # rank 5 by basename
++        ("aaa.txt", sr_name_aaa),  # rank 4 by basename
++    ]
++    table = render_fit_batch(results, lang="en")
++    lines = [ln for ln in table.splitlines() if ln.startswith("|") and "---" not in ln]
++    # lines[0] = header, lines[1..] = data rows
++    data_lines = lines[1:]
++    assert len(data_lines) == 5
++
++    # Tier 1: scorewinner is first (highest score)
++    assert "scorewinner.txt" in data_lines[0]
++
++    # Tier 2: covwinner before covloser (same score, higher coverage%)
++    cov_win_pos = next(i for i, ln in enumerate(data_lines) if "covwinner.txt" in ln)
++    cov_los_pos = next(i for i, ln in enumerate(data_lines) if "covloser.txt" in ln)
++    assert cov_win_pos < cov_los_pos, "higher coverage% must rank above lower coverage% when scores tie"
++
++    # Tier 3: aaa.txt before zzz.txt (same score + coverage%, basename ascending)
++    aaa_pos = next(i for i, ln in enumerate(data_lines) if "aaa.txt" in ln)
++    zzz_pos = next(i for i, ln in enumerate(data_lines) if "zzz.txt" in ln)
++    assert aaa_pos < zzz_pos, "ascending basename must be the tiebreak when score and coverage% are equal"
++
++
++# ---------------------------------------------------------------------------
++# Done-when: mutual exclusion — --jd + --jd-dir → exit 2
++# ---------------------------------------------------------------------------
++
++
++def test_mutual_exclusion_both_flags(tmp_path, capsys):
++    """'When both --jd and --jd-dir are supplied: the CLI exits with code 2 and
++    prints exactly ONE line to stderr naming both options as mutually exclusive.'"""
++    jd_path = tmp_path / "jd.txt"
++    jd_path.write_text("python", encoding="utf-8")
++
++    code = run(
++        [
++            "--source-type",
++            "github",
++            "--source",
++            "https://github.com/owner/repo",
++            "--author",
++            "alice",
++            "--jd",
++            str(jd_path),
++            "--jd-dir",
++            str(tmp_path),
++        ],
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(),
++    )
++    captured = capsys.readouterr()
++    assert code == 2
++    stderr_lines = [ln for ln in captured.err.splitlines() if ln.strip()]
++    assert len(stderr_lines) == 1
++
++
++# ---------------------------------------------------------------------------
++# Done-when: neither --jd nor --jd-dir supplied → exit 2
++# ---------------------------------------------------------------------------
++
++
++def test_neither_jd_nor_jd_dir(tmp_path, capsys):
++    """'When neither --jd nor --jd-dir is supplied: the CLI exits with code 2 and
++    prints exactly ONE line to stderr naming both options as mutually exclusive and
++    required.'"""
++    code = run(
++        [
++            "--source-type",
++            "github",
++            "--source",
++            "https://github.com/owner/repo",
++            "--author",
++            "alice",
++        ],
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(),
++    )
++    captured = capsys.readouterr()
++    assert code == 2
++    stderr_lines = [ln for ln in captured.err.splitlines() if ln.strip()]
++    assert len(stderr_lines) == 1
++
++
++# ---------------------------------------------------------------------------
++# Done-when: empty dir → exit 2
++# ---------------------------------------------------------------------------
++
++
++def test_jd_dir_empty_dir_exits_2(tmp_path, capsys):
++    """'When --jd-dir resolves to zero matching files: the CLI exits with code 2
++    and prints exactly ONE line to stderr that names --jd-dir <path> and the reason
++    (no matching JDs). It does NOT raise an uncaught exception.'"""
++    # tmp_path is an existing but empty directory
++    code = run(
++        _base_batch_argv(str(tmp_path), lang="en"),
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(),
++    )
++    captured = capsys.readouterr()
++    assert code == 2
++    assert "Traceback" not in captured.err
++    stderr_lines = [ln for ln in captured.err.splitlines() if ln.strip()]
++    assert len(stderr_lines) == 1
++    # The message must mention --jd-dir or the path
++    assert "--jd-dir" in captured.err or str(tmp_path) in captured.err
++
++
++def test_jd_dir_nonexistent_dir_exits_2(tmp_path, capsys):
++    """'When --jd-dir points to a non-existent directory: exit 2, one stderr line,
++    no traceback.'"""
++    nonexistent = str(tmp_path / "does_not_exist")
++    code = run(
++        _base_batch_argv(nonexistent, lang="en"),
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(),
++    )
++    captured = capsys.readouterr()
++    assert code == 2
++    assert "Traceback" not in captured.err
++    stderr_lines = [ln for ln in captured.err.splitlines() if ln.strip()]
++    assert len(stderr_lines) == 1
++
++
++def test_jd_dir_only_other_extensions_exits_2(tmp_path, capsys):
++    """'When --jd-dir dir-of-only-other-extensions: exit 2, one stderr line.'"""
++    (tmp_path / "notes.json").write_text("{}", encoding="utf-8")
++    (tmp_path / "data.csv").write_text("a,b,c", encoding="utf-8")
++    code = run(
++        _base_batch_argv(str(tmp_path), lang="en"),
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(),
++    )
++    captured = capsys.readouterr()
++    assert code == 2
++    stderr_lines = [ln for ln in captured.err.splitlines() if ln.strip()]
++    assert len(stderr_lines) == 1
++
++
++# ---------------------------------------------------------------------------
++# Done-when: "build once" — extractor called exactly once for N JDs
++# ---------------------------------------------------------------------------
++
++
++def test_build_once_extractor_called_once(tmp_path, capsys):
++    """'The portfolio is built exactly ONCE per --jd-dir invocation: in a test,
++    an injected counting extractor is called exactly once when N JDs are scored
++    (N >= 2).'"""
++    (tmp_path / "a.txt").write_text("python backend", encoding="utf-8")
++    (tmp_path / "b.txt").write_text("java spring", encoding="utf-8")
++    (tmp_path / "c.md").write_text("go microservices", encoding="utf-8")
++
++    extractor_calls: list = []
++
++    def counting_extractor(*, repo: str, author: str) -> list[Evidence]:
++        extractor_calls.append((repo, author))
++        return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
++
++    runner_calls: list = []
++
++    def counting_runner(prompt: str) -> str:
++        runner_calls.append(prompt)
++        return json.dumps([{"text": "Built a python backend service", "evidence_refs": ["PR#1"], "confidence": 0.9}])
++
++    code = run(
++        _base_batch_argv(str(tmp_path), lang="en"),
++        extractor=counting_extractor,
++        runner=counting_runner,
++        grader_runner=_make_grader_runner(),
++    )
++    capsys.readouterr()
++    assert code == 0
++    # Extractor called exactly once (portfolio built once)
++    assert len(extractor_calls) == 1
++
++    # Runner (narrative model) called same number of times as a single-JD invocation
++    # In the current pipeline, runner is called once to narrate claims.
++    # For single --jd, runner_calls would be 1; batch should also be 1.
++    single_runner_calls: list = []
++
++    def single_counting_runner(prompt: str) -> str:
++        single_runner_calls.append(prompt)
++        return json.dumps([{"text": "Built a python backend service", "evidence_refs": ["PR#1"], "confidence": 0.9}])
++
++    jd_path = tmp_path / "single.txt"
++    jd_path.write_text("python backend", encoding="utf-8")
++    single_extractor_calls: list = []
++
++    def single_counting_extractor(*, repo: str, author: str) -> list[Evidence]:
++        single_extractor_calls.append((repo, author))
++        return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
++
++    run(
++        _base_single_argv(str(jd_path), lang="en"),
++        extractor=single_counting_extractor,
++        runner=single_counting_runner,
++        grader_runner=_make_grader_runner(),
++    )
++    capsys.readouterr()
++    # The runner call count for batch should be same as for single-JD
++    assert len(runner_calls) == len(single_runner_calls)
++
++
++# ---------------------------------------------------------------------------
++# Done-when: score_fit per JD, same Portfolio instance
++# ---------------------------------------------------------------------------
++
++
++def test_score_fit_same_portfolio_instance(tmp_path, capsys, monkeypatch):
++    """'score_fit is invoked once per matching JD file; the Portfolio object passed
++    to it is the SAME in-memory instance (is-identical) across all calls.'"""
++    (tmp_path / "a.txt").write_text("python backend", encoding="utf-8")
++    (tmp_path / "b.txt").write_text("java spring", encoding="utf-8")
++
++    import fit.cli as _fit_cli
++    from fit.score import score_fit as _real_score_fit
++
++    calls: list[dict] = []
++
++    def spy_score_fit(portfolio, jd_text):
++        calls.append({"portfolio": portfolio, "jd_text": jd_text})
++        return _real_score_fit(portfolio, jd_text)
++
++    monkeypatch.setattr(_fit_cli, "score_fit", spy_score_fit)
++
++    code = run(
++        _base_batch_argv(str(tmp_path), lang="en"),
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(),
++    )
++    capsys.readouterr()
++    assert code == 0
++    # Called once per JD file (2 files)
++    assert len(calls) == 2
++    # Same Portfolio instance across all calls
++    assert calls[0]["portfolio"] is calls[1]["portfolio"]
++
++
++# ---------------------------------------------------------------------------
++# Done-when: determinism
++# ---------------------------------------------------------------------------
++
++
++def test_jd_dir_determinism(tmp_path, capsys):
++    """'Running --jd-dir twice with the same (portfolio source inputs, JD set,
++    --lang) produces byte-identical stdout.'"""
++    (tmp_path / "a.txt").write_text("python backend engineer", encoding="utf-8")
++    (tmp_path / "b.md").write_text("java spring developer", encoding="utf-8")
++
++    argv = _base_batch_argv(str(tmp_path), lang="en")
++
++    code1 = run(argv, extractor=_fake_extractor, runner=_fake_runner, grader_runner=_make_grader_runner(80))
++    out1 = capsys.readouterr().out
++
++    code2 = run(argv, extractor=_fake_extractor, runner=_fake_runner, grader_runner=_make_grader_runner(80))
++    out2 = capsys.readouterr().out
++
++    assert code1 == 0
++    assert code2 == 0
++    assert out1 == out2, "batch output must be byte-identical on repeated runs"
++
++
++# ---------------------------------------------------------------------------
++# Done-when: single-JD byte-identity golden (IR-003)
++# ---------------------------------------------------------------------------
++
++
++def test_single_jd_golden(tmp_path, capsys):
++    """'A golden file pair captured from the BASE branch (pre-change) is checked in at
++    tests/golden/fit_single_jd/stdout.md and stderr.txt. A test runs fit.cli.run(...)
++    on the same --jd <path> argv that produced the golden and asserts
++    captured.out == golden_stdout AND captured.err == golden_stderr, byte-for-byte.'"""
++    golden_dir = Path(__file__).resolve().parent / "golden" / "fit_single_jd"
++    golden_stdout = (golden_dir / "stdout.md").read_text(encoding="utf-8")
++    golden_stderr = (golden_dir / "stderr.txt").read_text(encoding="utf-8")
++
++    jd_path = tmp_path / "jd.txt"
++    jd_path.write_text("python backend engineer", encoding="utf-8")
++
++    argv = [
++        "--source-type",
++        "github",
++        "--source",
++        "https://github.com/owner/repo",
++        "--author",
++        "alice",
++        "--jd",
++        str(jd_path),
++    ]
++
++    code = run(
++        argv,
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(80),
++    )
++    captured = capsys.readouterr()
++    assert code == 0
++    assert captured.out == golden_stdout, "stdout must be byte-identical to the base-branch golden"
++    assert captured.err == golden_stderr, "stderr must be byte-identical to the base-branch golden"
++
++
++# ---------------------------------------------------------------------------
++# Done-when: batch web-source passes fetcher through (IR-001)
++# ---------------------------------------------------------------------------
++
++
++def test_batch_fetcher_passed_through(tmp_path, capsys):
++    """'Batch mode must thread the injected fetcher through _run_batch into the
++    SourceRequest/resolve path, matching single-JD behavior. With --source-type web
++    (the source type that actually invokes the fetcher during extraction), a counting
++    fetcher MUST be called; if batch mode dropped the fetcher (fetcher=None), extract()
++    would crash on a None call instead.'
++    Traces to IR-001: batch mode breaks --source-type web when fetcher=None."""
++    (tmp_path / "jd.txt").write_text("python backend", encoding="utf-8")
++
++    fetcher_calls: list = []
++
++    def counting_fetcher(url: str) -> str:
++        fetcher_calls.append(url)
++        return "<html><head><title>Post</title></head><body>python backend</body></html>"
++
++    argv = [
++        "--source-type",
++        "web",
++        "--source",
++        "https://blog.example.com/post",
++        "--author",
++        "alice",
++        "--jd-dir",
++        str(tmp_path),
++        "--lang",
++        "en",
++    ]
++
++    code = run(
++        argv,
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        fetcher=counting_fetcher,
++        grader_runner=_make_grader_runner(80),
++    )
++    capsys.readouterr()
++    assert code == 0
++    # Discriminating assertion: the web source resolves extract() to fetcher(url);
++    # batch mode must have threaded the injected fetcher through SourceRequest, so
++    # the fetcher is actually invoked with the normalized article URL.
++    assert fetcher_calls == ["https://blog.example.com/post"], (
++        "batch mode must thread the injected fetcher through to the web source resolve path"
++    )
++
++
++# ---------------------------------------------------------------------------
++# Done-when: IR-002 — unreadable JD file exits cleanly (no traceback)
++# ---------------------------------------------------------------------------
++
++
++def test_jd_file_invalid_utf8_exits_1(tmp_path, capsys):
++    """'Matching JD files are read without handling UnicodeError. An invalid-UTF-8
++    file raises an uncaught exception after the expensive portfolio build. Return
++    a clean nonzero error without a traceback and test both cases.'
++    Traces to IR-002 (UnicodeError case)."""
++    # Write a file with invalid UTF-8 bytes
++    bad_file = tmp_path / "bad.txt"
++    bad_file.write_bytes(b"python backend \xff\xfe invalid")
++
++    code = run(
++        _base_batch_argv(str(tmp_path), lang="en"),
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(80),
++    )
++    captured = capsys.readouterr()
++    assert code == 1
++    assert "Traceback" not in captured.err
++    # At least one non-empty stderr line about the failure
++    assert captured.err.strip() != ""
++
++
++# ---------------------------------------------------------------------------
++# Done-when: table-cell escaping (PR-002)
++# ---------------------------------------------------------------------------
++
++
++def test_escape_cell_pipe():
++    """'_escape_cell escapes | as \\|.'"""
++    assert _escape_cell("foo|bar") == "foo\\|bar"
++
++
++def test_escape_cell_newline():
++    """'_escape_cell replaces \\n with a space.'"""
++    assert _escape_cell("foo\nbar") == "foo bar"
++
++
++def test_escape_cell_carriage_return():
++    """'_escape_cell replaces \\r with a space.'"""
++    assert _escape_cell("foo\rbar") == "foo bar"
++
++
++def test_escape_cell_markdown_specials():
++    """'_escape_cell escapes Markdown specials (backtick, brackets, backslash, etc.).'"""
++    result = _escape_cell("`foo`")
++    assert "\\`" in result
++
++
++def test_table_cell_escaping_basename_with_pipe(tmp_path):
++    """'A test feeds the renderer a JD basename containing a literal | and a basename
++    containing a literal \\n and asserts: (a) rendered table has exactly one row per JD,
++    (b) no unescaped | appears inside any data cell, (c) no row spans more than one
++    line of output, (d) offending characters are encoded per the rule above.'"""
++    # We test via render_fit_batch directly (CLI can't take | in filename on most OS)
++    sr = ScoreResult(grade="B", band=(70, 84), coverage_pct=60.0, covered={}, gaps=set())
++    sr2 = ScoreResult(grade="C", band=(55, 69), coverage_pct=40.0, covered={}, gaps=set())
++
++    # Basename with a pipe
++    pipe_name = "role|senior.txt"
++    # Basename with a newline
++    newline_name = "role\njunior.txt"
++
++    results = [(pipe_name, sr), (newline_name, sr2)]
++    table = render_fit_batch(results, lang="en")
++    lines = table.splitlines()
++
++    # (a) exactly 2 data rows (plus 1 header + 1 sep = 4 total lines)
++    pipe_rows = [ln for ln in lines if ln.startswith("|")]
++    assert len(pipe_rows) == 4  # header + sep + 2 data rows
++
++    # (c) no row spans more than one output line — every | row is a single line
++    for ln in pipe_rows:
++        assert "\n" not in ln
++
++    # (b) check that no data cell contains an unescaped pipe (outside of row delimiters)
++    for data_line in pipe_rows[2:]:  # skip header and separator
++        # Strip leading and trailing | then check cells
++        inner = data_line.strip("|")
++        cells = inner.split("|")
++        for cell in cells:
++            # No raw (unescaped) pipe inside a cell
++            assert not any(ch == "|" and (i == 0 or cell[i - 1] != "\\") for i, ch in enumerate(cell))
++
++    # (d) the | in the basename is escaped as \|
++    assert "role\\|senior" in table
++    # (d) the \n in the basename is replaced with a space
++    assert "role junior.txt" in table or "role\x20junior.txt" in table
++
++
++def test_table_cell_escaping_top_gaps_with_pipe():
++    """'A second assertion exercises a Top Gaps token containing a literal | and
++    confirms it is escaped identically.'"""
++    sr = ScoreResult(
++        grade="C",
++        band=(55, 69),
++        coverage_pct=40.0,
++        covered={},
++        gaps={"foo|bar", "baz"},
++    )
++    table = render_fit_batch([("job.txt", sr)], lang="en")
++    # The | in the gap token must be escaped as \|
++    assert "foo\\|bar" in table
++    # Exactly 1 data row (the table didn't split into extra rows due to the |)
++    data_rows = [
++        ln
++        for ln in table.splitlines()
++        if ln.startswith("|") and "---" not in ln and LANGS["en"]["batch_col_jd"] not in ln
++    ]
++    assert len(data_rows) == 1
++    # The raw data row contains the escaped form, not a bare |
++    assert "foo\\|bar" in data_rows[0]
++
++
++# ---------------------------------------------------------------------------
++# Done-when: --lang ko no-leak on ranked table output (PR-001 extension)
++# ---------------------------------------------------------------------------
++
++
++def test_lang_ko_no_english_leak_in_batch_table(tmp_path, capsys):
++    """'--lang ko localizes the ranked-table column headers and the "none" cell text.
++    A test renders the ko ranked table and asserts none of the new LANGS["en"] UI
++    strings for the table appear verbatim in stdout.'"""
++    (tmp_path / "jd.txt").write_text("python backend", encoding="utf-8")
++
++    code = run(
++        _base_batch_argv(str(tmp_path), lang="ko"),
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(80),
++    )
++    captured = capsys.readouterr()
++    assert code == 0
++
++    # The new EN batch column header strings must not appear in ko output
++    en_batch_keys = ["batch_col_grade", "batch_col_score", "batch_col_coverage", "batch_col_top_gaps"]
++    for key in en_batch_keys:
++        en_val = LANGS["en"][key]
++        ko_val = LANGS["ko"][key]
++        if en_val == ko_val:
++            continue  # language-neutral (e.g. "JD" is same in both)
++        assert en_val not in captured.out, (
++            f"English UI string LANGS['en']['{key}']={en_val!r} leaked into ko batch render"
++        )
++
++    # Korean column headers must appear
++    assert LANGS["ko"]["batch_col_grade"] in captured.out
++
++
++# ---------------------------------------------------------------------------
++# Done-when: batch default lang = "en" when --lang omitted (PR-001)
++# ---------------------------------------------------------------------------
++
++
++def test_batch_default_lang_en_without_lang_flag(tmp_path, capsys):
++    """'When --jd-dir is used and --lang is OMITTED, the table language is en.
++    There is no auto-detection from JD contents in batch mode. A test runs --jd-dir
++    against a directory of Korean-text JDs without --lang, asserts the rendered
++    headers are the English LANGS["en"] table-header strings, and asserts the Korean
++    header strings from LANGS["ko"] do NOT appear in stdout.'"""
++    # Korean-dominant JD text
++    korean_jd = "파이썬 백엔드 개발자 구인합니다. 경력 3년 이상 필요합니다."
++    (tmp_path / "jd_ko.txt").write_text(korean_jd, encoding="utf-8")
++
++    # No --lang flag → should default to "en"
++    code = run(
++        [
++            "--source-type",
++            "github",
++            "--source",
++            "https://github.com/owner/repo",
++            "--author",
++            "alice",
++            "--jd-dir",
++            str(tmp_path),
++        ],
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(80),
++    )
++    captured = capsys.readouterr()
++    assert code == 0
++
++    # English headers must appear
++    assert LANGS["en"]["batch_col_grade"] in captured.out  # "Grade"
++    assert LANGS["en"]["batch_col_top_gaps"] in captured.out  # "Top Gaps"
++
++    # Korean batch headers must NOT appear in stdout
++    ko_grade = LANGS["ko"]["batch_col_grade"]  # "등급"
++    ko_gaps = LANGS["ko"]["batch_col_top_gaps"]  # "주요 격차"
++    assert ko_grade not in captured.out
++    assert ko_gaps not in captured.out
++
++
++# ---------------------------------------------------------------------------
++# Done-when: IR-002 — OSError on JD file exits cleanly (no traceback)
++# ---------------------------------------------------------------------------
++
++
++def test_jd_file_oserror_exits_1(tmp_path, capsys):
++    """'An unreadable JD file (OSError) must return a clean nonzero error without
++    a traceback.'
++    Traces to IR-002 (OSError case)."""
++    jd_file = tmp_path / "locked.txt"
++    jd_file.write_text("python backend", encoding="utf-8")
++    # Remove read permission so open() raises PermissionError (subclass of OSError)
++    jd_file.chmod(0o000)
++
++    try:
++        code = run(
++            _base_batch_argv(str(tmp_path), lang="en"),
++            extractor=_fake_extractor,
++            runner=_fake_runner,
++            grader_runner=_make_grader_runner(80),
++        )
++        captured = capsys.readouterr()
++        assert code == 1
++        assert "Traceback" not in captured.err
++        assert captured.err.strip() != ""
++    finally:
++        # Restore permissions so tmp_path cleanup works
++        jd_file.chmod(0o644)
++
++
++# ---------------------------------------------------------------------------
++# Done-when: grounding isolation — no JD text in Evidence
++# ---------------------------------------------------------------------------
++
++
++def test_grounding_isolation_no_jd_in_evidence(tmp_path, capsys, monkeypatch):
++    """'After a --jd-dir run, no JD basename and no substring of any JD body appears
++    in any Evidence.ref or Evidence.detail of the in-memory Portfolio.'"""
++    jd_text = "UNIQUEJDKEYWORD python backend"
++    jd_name = "UNIQUEJDBASENAME.txt"
++    (tmp_path / jd_name).write_text(jd_text, encoding="utf-8")
++
++    import fit.cli as _fit_cli
++
++    captured_portfolio: list = []
++    _real_score = _fit_cli.score_fit
++
++    def spy_score(portfolio, text):
++        captured_portfolio.append(portfolio)
++        return _real_score(portfolio, text)
++
++    monkeypatch.setattr(_fit_cli, "score_fit", spy_score)
++
++    code = run(
++        _base_batch_argv(str(tmp_path), lang="en"),
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(),
++    )
++    capsys.readouterr()
++    assert code == 0
++    assert captured_portfolio, "score_fit must have been called"
++
++    portfolio = captured_portfolio[0]
++    for ev in portfolio.evidence:
++        assert jd_name not in ev.ref, f"JD basename appeared in Evidence.ref: {ev.ref!r}"
++        assert jd_name not in ev.detail, f"JD basename appeared in Evidence.detail: {ev.detail!r}"
++        assert "UNIQUEJDKEYWORD" not in ev.ref
++        assert "UNIQUEJDKEYWORD" not in ev.detail
++
++
++# ---------------------------------------------------------------------------
++# Done-when: grounding summary printed exactly ONCE per --jd-dir invocation
++# ---------------------------------------------------------------------------
++
++
++def test_grounding_summary_once_in_batch(tmp_path, capsys):
++    """'The stderr grounding summary line (grounded: N  rejected: N  needs-confirmation: N)
++    is printed exactly ONCE per --jd-dir invocation, identical in format to
++    single---jd mode.'"""
++    (tmp_path / "a.txt").write_text("python backend", encoding="utf-8")
++    (tmp_path / "b.txt").write_text("java spring", encoding="utf-8")
++    (tmp_path / "c.md").write_text("go microservices", encoding="utf-8")
++
++    code = run(
++        _base_batch_argv(str(tmp_path), lang="en"),
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(),
++    )
++    captured = capsys.readouterr()
++    assert code == 0
++
++    summary_lines = [ln for ln in captured.err.splitlines() if ln.startswith("grounded:")]
++    assert len(summary_lines) == 1
++    # Format matches single-JD: "grounded: N  rejected: N  needs-confirmation: N"
++    assert "rejected:" in summary_lines[0]
++    assert "needs-confirmation:" in summary_lines[0]
++
++
++# ---------------------------------------------------------------------------
++# Done-when: i18n completeness — new batch keys in both en and ko
++# ---------------------------------------------------------------------------
++
++
++def test_batch_i18n_keys_present_in_both_langs():
++    """'New i18n keys for the ranked table are present in BOTH LANGS["en"] and
++    LANGS["ko"] with non-empty values.'"""
++    batch_keys = [
++        "batch_col_jd",
++        "batch_col_grade",
++        "batch_col_score",
++        "batch_col_coverage",
++        "batch_col_top_gaps",
++    ]
++    for key in batch_keys:
++        assert key in LANGS["en"], f"Missing LANGS['en']['{key}']"
++        assert LANGS["en"][key], f"LANGS['en']['{key}'] is empty"
++        assert key in LANGS["ko"], f"Missing LANGS['ko']['{key}']"
++        assert LANGS["ko"][key], f"LANGS['ko']['{key}'] is empty"
++
++
++# ---------------------------------------------------------------------------
++# Done-when: Score column is band midpoint (min + max) // 2
++# ---------------------------------------------------------------------------
++
++
++def test_score_column_is_band_midpoint():
++    """'The Score column contains a deterministic integer derived from score_result.band
++    as the band midpoint (min + max) // 2.'"""
++    for grade, band in GRADE_BANDS.items():
++        sr = ScoreResult(grade=grade, band=band, coverage_pct=50.0, covered={}, gaps=set())
++        table = render_fit_batch([("job.txt", sr)], lang="en")
++        expected_score = str((band[0] + band[1]) // 2)
++        assert expected_score in table, f"Expected midpoint {expected_score} for grade {grade} in table"
++
++
++# ---------------------------------------------------------------------------
++# Done-when: Top Gaps column — first 5 sorted gaps, or none_notice when empty
++# ---------------------------------------------------------------------------
++
++
++def test_top_gaps_shows_first_5_sorted():
++    """'The Top Gaps column contains the first 5 elements of sorted(score_result.gaps)
++    (alphabetical, deterministic), joined by ", ".'"""
++    gaps = {"zebra", "alpha", "mango", "beta", "kiwi", "orange"}  # 6 gaps
++    sr = ScoreResult(grade="D", band=(0, 54), coverage_pct=0.0, covered={}, gaps=gaps)
++    table = render_fit_batch([("job.txt", sr)], lang="en")
++
++    # First 5 alphabetically: alpha, beta, kiwi, mango, orange
++    # "zebra" should NOT appear (6th alphabetically)
++    assert "alpha" in table
++    assert "beta" in table
++    assert "kiwi" in table
++    assert "mango" in table
++    assert "orange" in table
++    assert "zebra" not in table
++
++
++def test_top_gaps_none_notice_when_empty():
++    """'If a JD has zero gaps the cell shows the localized none_notice string.'"""
++    sr = ScoreResult(grade="S", band=(96, 100), coverage_pct=100.0, covered={}, gaps=set())
++    table_en = render_fit_batch([("job.txt", sr)], lang="en")
++    table_ko = render_fit_batch([("job.txt", sr)], lang="ko")
++
++    assert LANGS["en"]["none_notice"] in table_en
++    assert LANGS["ko"]["none_notice"] in table_ko
++
++
++# ---------------------------------------------------------------------------
++# Done-when: JD column contains basename not full path
++# ---------------------------------------------------------------------------
++
++
++def test_jd_column_is_basename_not_full_path(tmp_path, capsys):
++    """'The JD column contains the JD basename (filename including extension),
++    not its full path.'"""
++    (tmp_path / "myfile.txt").write_text("python backend", encoding="utf-8")
++
++    code = run(
++        _base_batch_argv(str(tmp_path), lang="en"),
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(80),
++    )
++    captured = capsys.readouterr()
++    assert code == 0
++    assert "myfile.txt" in captured.out
++    # The full absolute path must NOT appear in any data cell
++    assert str(tmp_path) not in captured.out
++
++
++# ---------------------------------------------------------------------------
++# Done-when: --out writes ranked table to file in batch mode
++# ---------------------------------------------------------------------------
++
++
++def test_jd_dir_out_file(tmp_path, capsys):
++    """'With --out <path> in batch mode, the ranked table is written to <path>
++    and stdout is empty.'"""
++    (tmp_path / "a.txt").write_text("python backend", encoding="utf-8")
++    out_path = tmp_path / "ranked.md"
++
++    code = run(
++        _base_batch_argv(str(tmp_path), lang="en", out=str(out_path)),
++        extractor=_fake_extractor,
++        runner=_fake_runner,
++        grader_runner=_make_grader_runner(80),
++    )
++    captured = capsys.readouterr()
++    assert code == 0
++    assert captured.out.strip() == ""
++    assert out_path.exists()
++    content = out_path.read_text(encoding="utf-8")
++    assert LANGS["en"]["batch_col_grade"] in content
