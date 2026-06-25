@@ -109,9 +109,9 @@ def test_korean_jd_fit_coverage_not_degenerate():
     assert len(kw) > 0, "Korean JD should produce non-empty keywords"
 
     # Coverage must NOT be 100.0 — the claim does not cover Korean keywords
-    assert score_result.coverage_pct < 100.0, (
-        f"Coverage should not be 100% for a non-matching Korean JD; got {score_result.coverage_pct}"
-    )
+    assert (
+        score_result.coverage_pct < 100.0
+    ), f"Coverage should not be 100% for a non-matching Korean JD; got {score_result.coverage_pct}"
 
     # jd_keywords_total in a build_resume call also reflects real Korean tokens
     ev2 = Evidence(kind="pr", ref="PR#2", url="https://github.com/o/r/pull/2", detail="feat")

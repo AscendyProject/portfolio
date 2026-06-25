@@ -778,9 +778,9 @@ def test_readme_documents_jd_url_for_resume_and_fit():
         assert cmd in sections, f"README must have a /{cmd} section"
         body = "\n".join(sections[cmd]).lower()
         assert "--jd" in body, f"/{cmd} section must mention --jd"
-        assert ("http(s)" in body) or ("https url" in body) or ("url to a job" in body), (
-            f"/{cmd} section must document --jd accepting an http(s) URL"
-        )
+        assert (
+            ("http(s)" in body) or ("https url" in body) or ("url to a job" in body)
+        ), f"/{cmd} section must document --jd accepting an http(s) URL"
 
 
 # ---------------------------------------------------------------------------

@@ -474,9 +474,9 @@ def test_fit_cli_lang_ko_grader_prompt_contains_korean(capsys, tmp_path):
     )
     capsys.readouterr()
     assert code == 0
-    assert any(language_name("ko") in p for p in grader_prompts), (
-        "grader_runner prompt should contain 'Korean' when lang='ko'"
-    )
+    assert any(
+        language_name("ko") in p for p in grader_prompts
+    ), "grader_runner prompt should contain 'Korean' when lang='ko'"
 
 
 def test_fit_cli_korean_jd_autodetect_ko(capsys, tmp_path):
@@ -611,9 +611,9 @@ def test_rating_cli_lang_ko_grader_prompt_contains_korean(capsys):
     )
     capsys.readouterr()
     assert code == 0
-    assert any(language_name("ko") in p for p in grader_prompts), (
-        "grader_runner prompt should contain 'Korean' when lang='ko'"
-    )
+    assert any(
+        language_name("ko") in p for p in grader_prompts
+    ), "grader_runner prompt should contain 'Korean' when lang='ko'"
 
 
 def test_rating_cli_default_lang_en(capsys):
@@ -1030,6 +1030,6 @@ def test_reference_check_cli_threads_lang_into_narrative_and_letter(capsys):
     # The reference_check CLI uses the same runner for narration and the letter
     # prompt; EVERY captured prompt must be Korean-threaded (not just one).
     assert prompts, "reference_check runner was never invoked"
-    assert all(language_name("ko") in p for p in prompts), (
-        "a reference_check prompt was not threaded with the Korean language name"
-    )
+    assert all(
+        language_name("ko") in p for p in prompts
+    ), "a reference_check prompt was not threaded with the Korean language name"
