@@ -17,8 +17,37 @@ from portfolio.jd_source import (  # noqa: E402
     JDFetchError,
     JDFileReadError,
     JDInvalidURLError,
+    _extract_pdf_text,
     load_jd,
 )
+
+
+# ---------------------------------------------------------------------------
+# Fake pypdf injected via sys.modules so the PDF path is exercised without the
+# optional dependency installed (`_extract_pdf_text` imports pypdf lazily).
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_pypdf(monkeypatch, *, pages: list[str] | None = None, raises: bool = False):
+    import types
+
+    module = types.ModuleType("pypdf")
+
+    class _Page:
+        def __init__(self, text: str) -> None:
+            self._text = text
+
+        def extract_text(self) -> str:
+            return self._text
+
+    class PdfReader:
+        def __init__(self, _stream) -> None:
+            if raises:
+                raise ValueError("malformed PDF")
+            self.pages = [_Page(t) for t in (pages or [])]
+
+    module.PdfReader = PdfReader  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pypdf", module)
 
 
 # ---------------------------------------------------------------------------
@@ -249,3 +278,51 @@ def test_typed_exception_classes_are_distinct():
             raise JDInvalidURLError("test")
         except JDFileReadError:
             pass  # must NOT be caught here
+
+
+# ---------------------------------------------------------------------------
+# Done-when: PDF --jd files are detected by signature and extracted to text
+# ---------------------------------------------------------------------------
+
+
+def test_pdf_file_detected_by_signature_and_extracted(tmp_path, monkeypatch):
+    """A local file whose bytes start with the %PDF signature routes to the PDF
+    extractor (NOT utf-8 decode) and the fetcher is never called."""
+    pdf = tmp_path / "jd"  # no .pdf extension — detection is by bytes, not name
+    pdf.write_bytes(b"%PDF-1.4\n<<binary garbage that is not utf-8 \xff\xfe>>")
+
+    monkeypatch.setattr("portfolio.jd_source._extract_pdf_text", lambda data: "python backend engineer")
+
+    fetched: list[str] = []
+    result = load_jd(str(pdf), fetcher=lambda u: fetched.append(u) or "")
+    assert result == "python backend engineer"
+    assert fetched == []  # local file → fetcher untouched
+
+
+def test_extract_pdf_text_joins_pages(monkeypatch):
+    """_extract_pdf_text joins per-page text from pypdf."""
+    _install_fake_pypdf(monkeypatch, pages=["Python backend.", "Kubernetes, Go."])
+    assert _extract_pdf_text(b"%PDF-1.4 ...") == "Python backend.\nKubernetes, Go."
+
+
+def test_extract_pdf_text_empty_is_rejected(monkeypatch):
+    """An image-only/scanned PDF (no extractable text) raises JDFileReadError so
+    the caller never proceeds on an empty JD."""
+    _install_fake_pypdf(monkeypatch, pages=["", "   "])
+    with pytest.raises(JDFileReadError, match="no extractable text"):
+        _extract_pdf_text(b"%PDF-1.4 ...")
+
+
+def test_extract_pdf_text_malformed_pdf_wrapped(monkeypatch):
+    """A pypdf error on a malformed PDF is wrapped as JDFileReadError, not raised raw."""
+    _install_fake_pypdf(monkeypatch, raises=True)
+    with pytest.raises(JDFileReadError, match="could not read the PDF"):
+        _extract_pdf_text(b"%PDF-1.4 ...")
+
+
+def test_extract_pdf_text_missing_pypdf_gives_actionable_error(monkeypatch):
+    """When the optional 'pypdf' dependency is absent, the error names it and the
+    fallback (convert to text) rather than surfacing a raw ImportError."""
+    monkeypatch.setitem(sys.modules, "pypdf", None)  # import pypdf → ImportError
+    with pytest.raises(JDFileReadError, match="pypdf"):
+        _extract_pdf_text(b"%PDF-1.4 ...")

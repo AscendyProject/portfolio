@@ -36,7 +36,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-type", required=True, choices=list(known_source_types()))
     parser.add_argument("--source", help="source URL (a github repo URL, or an article URL for --source-type web)")
     parser.add_argument("--author", help="GitHub handle whose merged PRs are the evidence")
-    parser.add_argument("--jd", required=True, help="path to the job description file (plain text)")
+    parser.add_argument(
+        "--jd",
+        required=True,
+        help="job description: a local file (UTF-8 text, or PDF with the 'pdf' extra) or an http(s) URL",
+    )
     parser.add_argument("--top-n", type=int, default=12, help="max resume bullets to render (default: 12)")
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
     parser.add_argument(

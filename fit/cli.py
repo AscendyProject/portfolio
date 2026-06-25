@@ -41,7 +41,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="source URL (a GitHub repo URL, or an article URL for --source-type web)",
     )
     parser.add_argument("--author", help="GitHub handle or subject name")
-    parser.add_argument("--jd", default=None, help="path or http(s) URL to the job description file (plain text)")
+    parser.add_argument(
+        "--jd",
+        default=None,
+        help="job description: a local file (UTF-8 text, or PDF with the 'pdf' extra) or an http(s) URL",
+    )
     parser.add_argument(
         "--jd-dir",
         default=None,

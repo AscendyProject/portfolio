@@ -6,11 +6,16 @@ classes that callers catch individually to produce the correct exit-2 messages.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
 from portfolio.web import _ArticleParser, parse_web_source
+
+# A PDF always begins with the "%PDF-" signature; we detect by bytes, not the
+# `.pdf` extension, so a mis-named or extension-less PDF is still handled.
+_PDF_MAGIC = b"%PDF-"
 
 
 class JDFileReadError(Exception):
@@ -69,8 +74,43 @@ def load_jd(value: str, *, fetcher: Callable[[str], str]) -> str:
         parts = [p for p in (parser.title, parser.body) if p]
         return "\n\n".join(parts)
     else:
-        # File branch
+        # File branch. Read bytes first so we can sniff a PDF signature; a PDF is
+        # extracted to text (best-effort — the JD only drives selection, never
+        # grounding), everything else is decoded as UTF-8 as before.
         try:
-            return Path(value).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            data = Path(value).read_bytes()
+        except OSError as exc:
             raise JDFileReadError(str(exc)) from exc
+        if data[: len(_PDF_MAGIC)] == _PDF_MAGIC:
+            return _extract_pdf_text(data)
+        try:
+            return data.decode("utf-8")
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise JDFileReadError(str(exc)) from exc
+
+
+def _extract_pdf_text(data: bytes) -> str:
+    """Extract text from a PDF JD (bytes), raising JDFileReadError on any failure.
+
+    `pypdf` is an OPTIONAL dependency (the core install carries no runtime deps),
+    imported lazily here: if it is absent we raise a clear, actionable error rather
+    than a stack trace. An image-only/scanned PDF yields no text and is rejected so
+    the caller never proceeds on an empty JD."""
+    try:
+        import pypdf
+    except ImportError as exc:
+        raise JDFileReadError(
+            "reading a PDF --jd needs the optional 'pypdf' dependency: "
+            "pip install 'portfolio[pdf]' (or convert the PDF to a UTF-8 .txt)"
+        ) from exc
+
+    try:
+        reader = pypdf.PdfReader(io.BytesIO(data))
+        text = "\n".join((page.extract_text() or "") for page in reader.pages)
+    except Exception as exc:  # pypdf raises various errors on malformed PDFs
+        raise JDFileReadError(f"could not read the PDF --jd: {exc}") from exc
+
+    text = text.strip()
+    if not text:
+        raise JDFileReadError("the PDF --jd has no extractable text (scanned/image-only?); convert it to a UTF-8 .txt")
+    return text

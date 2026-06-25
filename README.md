@@ -110,7 +110,8 @@ with `## Other` always last.
 
 Run `python -m resume --source-type <type> --source <url> --author <handle> --jd <path-or-url>`
 to render a grounded **resume** filtered by a job description. `--jd` accepts either a
-local filesystem path to a plain-text file **or** an `http(s)` URL to a job posting page
+local filesystem path (a UTF-8 text file, or a **PDF** if the optional `pdf` extra is
+installed — `pip install 'portfolio[pdf]'`) **or** an `http(s)` URL to a job posting page
 (the page is fetched via an offline-SSRF-guarded layer and its article text is used as the
 JD). Every bullet traces to a real evidence ref already present in the grounded portfolio —
 hallucinated refs are rejected by `resume.select.enforce_grounding` and never appear in the
@@ -148,8 +149,9 @@ front door; `--out <file>` writes to a file instead of stdout.
 
 Run `python -m fit --source-type <type> --source <url> --author <handle> --jd <path-or-url>`
 to render a grounded **JD fit assessment** for the developer. `--jd` accepts either a
-local filesystem path to a plain-text file **or** an `http(s)` URL to a job posting page
-(fetched via the same SSRF-guarded layer as `--source-type web`). The assessment uses a
+local filesystem path (a UTF-8 text file, or a **PDF** with the optional `pdf` extra) **or**
+an `http(s)` URL to a job posting page (fetched via the same SSRF-guarded layer as
+`--source-type web`). The assessment uses a
 **two-tier hybrid**:
 
 1. **Deterministic grade (S/A/B/C/D)** — JD-coverage% is computed by matching

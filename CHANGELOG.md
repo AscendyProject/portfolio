@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **PDF job-description files for `--jd`** (`resume` / `fit`) — a local `--jd` is now
+  detected by its `%PDF-` signature (not the extension) and its text extracted, so a
+  PDF JD works without converting first. Extraction uses `pypdf`, gated behind an
+  optional `pdf` extra (`pip install 'portfolio[pdf]'`) and imported lazily so the
+  core install stays dependency-free; without it, a PDF `--jd` gives a clear,
+  actionable error. A scanned/image-only PDF (no extractable text) is rejected
+  rather than silently producing an empty JD (#66).
+
 ### Security
 - **IR-001 — refuse before the first model call:** `resolve_and_optionally_mask`
   now runs the masking guard (`assert_maskable`) on extracted evidence **before**
