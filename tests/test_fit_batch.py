@@ -534,11 +534,10 @@ def test_batch_fetcher_passed_through(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_jd_file_invalid_utf8_exits_1(tmp_path, capsys):
-    """'Matching JD files are read without handling UnicodeError. An invalid-UTF-8
-    file raises an uncaught exception after the expensive portfolio build. Return
-    a clean nonzero error without a traceback and test both cases.'
-    Traces to IR-002 (UnicodeError case)."""
+def test_jd_file_invalid_utf8_exits_2(tmp_path, capsys):
+    """An invalid-UTF-8 JD file is rejected in the BEFORE-build preflight (codex
+    IR-002), so it exits 2 (input error) without wasting the portfolio build, with
+    a clean nonzero error and no traceback."""
     # Write a file with invalid UTF-8 bytes
     bad_file = tmp_path / "bad.txt"
     bad_file.write_bytes(b"python backend \xff\xfe invalid")
@@ -550,7 +549,7 @@ def test_jd_file_invalid_utf8_exits_1(tmp_path, capsys):
         grader_runner=_make_grader_runner(80),
     )
     captured = capsys.readouterr()
-    assert code == 1
+    assert code == 2
     assert "Traceback" not in captured.err
     # At least one non-empty stderr line about the failure
     assert captured.err.strip() != ""
@@ -732,7 +731,7 @@ def test_batch_default_lang_en_without_lang_flag(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_jd_file_oserror_exits_1(tmp_path, capsys):
+def test_jd_file_oserror_exits_2(tmp_path, capsys):
     """'An unreadable JD file (OSError) must return a clean nonzero error without
     a traceback.'
     Traces to IR-002 (OSError case)."""
@@ -749,7 +748,7 @@ def test_jd_file_oserror_exits_1(tmp_path, capsys):
             grader_runner=_make_grader_runner(80),
         )
         captured = capsys.readouterr()
-        assert code == 1
+        assert code == 2
         assert "Traceback" not in captured.err
         assert captured.err.strip() != ""
     finally:
@@ -804,7 +803,7 @@ def test_batch_missing_pypdf_on_pdf_jd_errors_cleanly(tmp_path, capsys, monkeypa
         grader_runner=_make_grader_runner(80),
     )
     captured = capsys.readouterr()
-    assert code == 1
+    assert code == 2
     assert "pypdf" in captured.err
     assert "Traceback" not in captured.err
 

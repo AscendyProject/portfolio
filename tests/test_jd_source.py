@@ -360,3 +360,62 @@ def test_extract_pdf_text_missing_pypdf_gives_actionable_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "pypdf", None)  # import pypdf → ImportError
     with pytest.raises(JDFileReadError, match="pypdf"):
         _extract_pdf_text(b"%PDF-1.4 ...")
+
+
+# ---------------------------------------------------------------------------
+# codex IR-003: real-PDF fixtures (not fake pypdf) — exercise the actual parser
+# against the limit/encryption/empty paths. Gated on pypdf being installed.
+# ---------------------------------------------------------------------------
+
+
+def test_real_empty_pdf_rejected_ir003(tmp_path):
+    """A REAL empty PDF (pypdf-generated, no extractable text) is rejected."""
+    pypdf = pytest.importorskip("pypdf")
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    p = tmp_path / "blank.pdf"
+    with open(p, "wb") as fh:
+        writer.write(fh)
+    with pytest.raises(JDFileReadError, match="no extractable text"):
+        load_jd(str(p), fetcher=lambda u: "")
+
+
+def test_real_truncated_pdf_wrapped_ir003(tmp_path):
+    """A REAL truncated PDF is wrapped as JDFileReadError, not raised raw."""
+    pypdf = pytest.importorskip("pypdf")
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    p = tmp_path / "trunc.pdf"
+    with open(p, "wb") as fh:
+        writer.write(fh)
+    data = p.read_bytes()
+    p.write_bytes(data[: len(data) // 2])  # cut it in half
+    with pytest.raises(JDFileReadError):
+        load_jd(str(p), fetcher=lambda u: "")
+
+
+def test_real_encrypted_pdf_rejected_ir003(tmp_path):
+    """A REAL encrypted PDF is refused (codex IR-001/IR-003), not silently empty."""
+    pypdf = pytest.importorskip("pypdf")
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.encrypt("secret")
+    p = tmp_path / "enc.pdf"
+    with open(p, "wb") as fh:
+        writer.write(fh)
+    with pytest.raises(JDFileReadError, match="encrypted"):
+        load_jd(str(p), fetcher=lambda u: "")
+
+
+def test_real_too_many_pages_rejected_ir003(tmp_path, monkeypatch):
+    """A REAL multi-page PDF over the page cap is rejected (resource limit)."""
+    pypdf = pytest.importorskip("pypdf")
+    monkeypatch.setattr("portfolio.jd_source._PDF_MAX_PAGES", 2)
+    writer = pypdf.PdfWriter()
+    for _ in range(3):  # 3 > 2
+        writer.add_blank_page(width=72, height=72)
+    p = tmp_path / "many.pdf"
+    with open(p, "wb") as fh:
+        writer.write(fh)
+    with pytest.raises(JDFileReadError, match="too many pages"):
+        load_jd(str(p), fetcher=lambda u: "")

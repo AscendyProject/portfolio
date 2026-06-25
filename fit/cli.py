@@ -236,6 +236,19 @@ def _run_batch(
         print(f"invalid source: {exc}", file=sys.stderr)
         return 2
 
+    # Preflight: read & validate EVERY JD before the expensive build (codex IR-002),
+    # so a missing pypdf / corrupt / encrypted / oversized PDF fails fast without
+    # wasting source extraction or model work. Loaded text is reused for scoring.
+    jd_loaded: list[tuple[str, str]] = []
+    for jd_path in jd_files:
+        try:
+            # PDFs are extracted the same way as single --jd (text → UTF-8 decode,
+            # PDF → pypdf). fetcher is unused for a local path but required by the sig.
+            jd_loaded.append((jd_path.name, load_jd(str(jd_path), fetcher=fetcher)))
+        except JDFileReadError as exc:
+            print(f"cannot read JD file {jd_path!r}: {exc}", file=sys.stderr)
+            return 2
+
     # Build the portfolio ONCE.
     try:
         result, n_masked = resolve_and_optionally_mask(
@@ -258,17 +271,9 @@ def _run_batch(
 
     # Score per JD; collect (basename, ScoreResult) pairs.
     batch_results: list[tuple[str, object]] = []
-    for jd_path in jd_files:
-        try:
-            # Route through load_jd so PDFs are extracted the same way as single
-            # --jd (text → UTF-8 decode, PDF → pypdf). fetcher is unused for a
-            # local path but required by the signature.
-            jd_text = load_jd(str(jd_path), fetcher=fetcher)
-        except JDFileReadError as exc:
-            print(f"cannot read JD file {jd_path!r}: {exc}", file=sys.stderr)
-            return 1
+    for name, jd_text in jd_loaded:
         score_result = score_fit(portfolio, jd_text)
-        batch_results.append((jd_path.name, score_result))
+        batch_results.append((name, score_result))
 
     # Grounding summary → stderr, exactly once.
     grounding = result.grounding
