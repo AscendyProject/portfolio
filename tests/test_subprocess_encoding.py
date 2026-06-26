@@ -54,9 +54,9 @@ def test_run_gh_passes_encoding_utf8(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     _run_gh(["pr", "list"])
 
-    assert captured["kwargs"].get("encoding") == "utf-8", (
-        f"expected encoding='utf-8', got {captured['kwargs'].get('encoding')!r}"
-    )
+    assert (
+        captured["kwargs"].get("encoding") == "utf-8"
+    ), f"expected encoding='utf-8', got {captured['kwargs'].get('encoding')!r}"
     assert captured["kwargs"].get("text") is True
 
 
@@ -85,9 +85,9 @@ def test_run_gh_roundtrips_non_ascii_stdout(monkeypatch):
     result = _run_gh(["pr", "list"])
 
     # The mechanism: encoding must be utf-8.
-    assert captured["kwargs"].get("encoding") == "utf-8", (
-        f"encoding='utf-8' required for non-ASCII round-trip; got {captured['kwargs'].get('encoding')!r}"
-    )
+    assert (
+        captured["kwargs"].get("encoding") == "utf-8"
+    ), f"encoding='utf-8' required for non-ASCII round-trip; got {captured['kwargs'].get('encoding')!r}"
     # The observable result: text survives unchanged.
     assert result == korean_text, f"non-ASCII stdout not preserved: {result!r}"
 
@@ -111,9 +111,9 @@ def test_run_claude_passes_encoding_utf8(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     run_claude("some prompt")
 
-    assert captured["kwargs"].get("encoding") == "utf-8", (
-        f"expected encoding='utf-8', got {captured['kwargs'].get('encoding')!r}"
-    )
+    assert (
+        captured["kwargs"].get("encoding") == "utf-8"
+    ), f"expected encoding='utf-8', got {captured['kwargs'].get('encoding')!r}"
     assert captured["kwargs"].get("text") is True
 
 
@@ -133,9 +133,9 @@ def test_run_claude_prompt_via_stdin_not_argv(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     run_claude(prompt)
 
-    assert captured["kwargs"].get("input") == prompt, (
-        f"prompt should be passed as stdin input=, got input={captured['kwargs'].get('input')!r}"
-    )
+    assert (
+        captured["kwargs"].get("input") == prompt
+    ), f"prompt should be passed as stdin input=, got input={captured['kwargs'].get('input')!r}"
     assert prompt not in captured["args"], f"prompt must not appear in argv; argv={captured['args']}"
 
 
@@ -163,9 +163,9 @@ def test_run_claude_returns_result_from_json_envelope_with_output_format_in_argv
 
     # The stdin contract must hold (this is the breaking change that makes the
     # test red against current code).
-    assert captured["kwargs"].get("input") == prompt, (
-        f"prompt should be via stdin, got input={captured['kwargs'].get('input')!r}"
-    )
+    assert (
+        captured["kwargs"].get("input") == prompt
+    ), f"prompt should be via stdin, got input={captured['kwargs'].get('input')!r}"
     assert prompt not in captured["args"], f"prompt must not be in argv; argv={captured['args']}"
     # The JSON-envelope contract must be preserved.
     assert "--output-format" in captured["args"], "--output-format must still be in argv"
@@ -192,9 +192,9 @@ def test_run_codex_passes_encoding_utf8(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     run_codex("some prompt")
 
-    assert captured["kwargs"].get("encoding") == "utf-8", (
-        f"expected encoding='utf-8', got {captured['kwargs'].get('encoding')!r}"
-    )
+    assert (
+        captured["kwargs"].get("encoding") == "utf-8"
+    ), f"expected encoding='utf-8', got {captured['kwargs'].get('encoding')!r}"
     assert captured["kwargs"].get("text") is True
 
 
@@ -219,9 +219,9 @@ def test_default_grader_runner_passes_encoding_utf8(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     rating_cli._default_grader_runner("some prompt")
 
-    assert captured["kwargs"].get("encoding") == "utf-8", (
-        f"expected encoding='utf-8', got {captured['kwargs'].get('encoding')!r}"
-    )
+    assert (
+        captured["kwargs"].get("encoding") == "utf-8"
+    ), f"expected encoding='utf-8', got {captured['kwargs'].get('encoding')!r}"
     assert captured["kwargs"].get("text") is True
 
 
@@ -245,9 +245,9 @@ def test_default_grader_runner_prompt_via_stdin_not_argv(monkeypatch):
     result = rating_cli._default_grader_runner(prompt)
 
     # prompt delivered via stdin, not argv
-    assert captured["kwargs"].get("input") == prompt, (
-        f"prompt should be passed as stdin input=, got input={captured['kwargs'].get('input')!r}"
-    )
+    assert (
+        captured["kwargs"].get("input") == prompt
+    ), f"prompt should be passed as stdin input=, got input={captured['kwargs'].get('input')!r}"
     assert prompt not in captured["args"], f"prompt must not appear in argv; argv={captured['args']}"
     # --output-format json still present
     assert "--output-format" in captured["args"], "--output-format flag must still be present in argv"
@@ -281,9 +281,9 @@ def test_run_gh_does_not_use_shell_true_and_passes_encoding(monkeypatch):
 
     assert captured["kwargs"].get("shell") is not True, "shell=True must not be used in _run_gh"
     # encoding must also be set — both invariants pinned together
-    assert captured["kwargs"].get("encoding") == "utf-8", (
-        f"encoding='utf-8' must be set; got {captured['kwargs'].get('encoding')!r}"
-    )
+    assert (
+        captured["kwargs"].get("encoding") == "utf-8"
+    ), f"encoding='utf-8' must be set; got {captured['kwargs'].get('encoding')!r}"
 
 
 def test_run_claude_does_not_use_shell_true_and_passes_encoding(monkeypatch):
@@ -303,9 +303,9 @@ def test_run_claude_does_not_use_shell_true_and_passes_encoding(monkeypatch):
     run_claude("prompt")
 
     assert captured["kwargs"].get("shell") is not True, "shell=True must not be used in run_claude"
-    assert captured["kwargs"].get("encoding") == "utf-8", (
-        f"encoding='utf-8' must be set; got {captured['kwargs'].get('encoding')!r}"
-    )
+    assert (
+        captured["kwargs"].get("encoding") == "utf-8"
+    ), f"encoding='utf-8' must be set; got {captured['kwargs'].get('encoding')!r}"
 
 
 def test_run_codex_does_not_use_shell_true_and_passes_encoding(monkeypatch):
@@ -325,9 +325,9 @@ def test_run_codex_does_not_use_shell_true_and_passes_encoding(monkeypatch):
     run_codex("prompt")
 
     assert captured["kwargs"].get("shell") is not True, "shell=True must not be used in run_codex"
-    assert captured["kwargs"].get("encoding") == "utf-8", (
-        f"encoding='utf-8' must be set; got {captured['kwargs'].get('encoding')!r}"
-    )
+    assert (
+        captured["kwargs"].get("encoding") == "utf-8"
+    ), f"encoding='utf-8' must be set; got {captured['kwargs'].get('encoding')!r}"
 
 
 def test_default_grader_runner_does_not_use_shell_true_and_passes_encoding(monkeypatch):
@@ -349,6 +349,6 @@ def test_default_grader_runner_does_not_use_shell_true_and_passes_encoding(monke
     rating_cli._default_grader_runner("prompt")
 
     assert captured["kwargs"].get("shell") is not True, "shell=True must not be used in _default_grader_runner"
-    assert captured["kwargs"].get("encoding") == "utf-8", (
-        f"encoding='utf-8' must be set; got {captured['kwargs'].get('encoding')!r}"
-    )
+    assert (
+        captured["kwargs"].get("encoding") == "utf-8"
+    ), f"encoding='utf-8' must be set; got {captured['kwargs'].get('encoding')!r}"

@@ -910,9 +910,9 @@ def test_render_markdown_regression_multi_group_behavior_preserving():
 
     # Discriminating: public helpers must exist as callables in portfolio.render.
     assert callable(getattr(_pr, "claim_group", None)), "portfolio.render.claim_group must be a public callable"
-    assert callable(getattr(_pr, "count_repos_from_refs", None)), (
-        "portfolio.render.count_repos_from_refs must be a public callable"
-    )
+    assert callable(
+        getattr(_pr, "count_repos_from_refs", None)
+    ), "portfolio.render.count_repos_from_refs must be a public callable"
     assert callable(getattr(_pr, "stack_languages", None)), "portfolio.render.stack_languages must be a public callable"
 
     p = Portfolio(

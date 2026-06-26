@@ -316,9 +316,9 @@ def test_stem_match_end_to_end_score_fit():
     assert result.coverage_pct > 0
     # covered dict must contain a stem that matches "migration" / "migrations"
     migration_stem = _stem("migration")
-    assert migration_stem in result.covered, (
-        f"Expected {migration_stem!r} in covered; covered={set(result.covered.keys())}"
-    )
+    assert (
+        migration_stem in result.covered
+    ), f"Expected {migration_stem!r} in covered; covered={set(result.covered.keys())}"
 
 
 # ===========================================================================
@@ -375,9 +375,9 @@ def test_score_fit_non_code_requirements_field():
     year_stem = _stem("years")
     bachelor_stem = _stem("bachelor")
     japanese_stem = _stem("japanese")
-    assert year_stem in result.non_code_requirements, (
-        f"{year_stem!r} must be in non_code_requirements; got {result.non_code_requirements}"
-    )
+    assert (
+        year_stem in result.non_code_requirements
+    ), f"{year_stem!r} must be in non_code_requirements; got {result.non_code_requirements}"
     assert bachelor_stem in result.non_code_requirements
     assert japanese_stem in result.non_code_requirements
 
@@ -468,9 +468,9 @@ def test_well_matched_coverage_at_least_50_pct():
     """Well-matched JD coverage% must be >= 50.0 (not stuck in the ~26% defect range)."""
     portfolio = _make_tech_portfolio()
     match_result = score_fit(portfolio, _JD_MATCH)
-    assert match_result.coverage_pct >= 50.0, (
-        f"Well-matched JD should score ≥50% coverage; got {match_result.coverage_pct:.1f}%"
-    )
+    assert (
+        match_result.coverage_pct >= 50.0
+    ), f"Well-matched JD should score ≥50% coverage; got {match_result.coverage_pct:.1f}%"
 
 
 # ===========================================================================
