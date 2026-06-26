@@ -41,11 +41,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="source URL (a GitHub repo URL, or an article URL for --source-type web)",
     )
     parser.add_argument("--author", help="GitHub handle or subject name")
-    parser.add_argument("--jd", default=None, help="path or http(s) URL to the job description file (plain text)")
+    parser.add_argument(
+        "--jd",
+        default=None,
+        help="job description: a local file (UTF-8 text, or PDF with the 'pdf' extra) or an http(s) URL",
+    )
     parser.add_argument(
         "--jd-dir",
         default=None,
-        help="directory of JD files (*.txt, *.md) to score in batch; mutually exclusive with --jd",
+        help="directory of JD files (*.txt, *.md, *.pdf) to score in batch; mutually exclusive with --jd",
     )
     parser.add_argument("--out", help="write Markdown to this file instead of stdout")
     parser.add_argument(
@@ -199,8 +203,9 @@ def _run_batch(
     """Execute batch mode: score the portfolio against every JD in --jd-dir."""
     jd_dir = Path(args.jd_dir)
 
-    # Collect matching files non-recursively; accepted suffixes are .txt and .md (case-sensitive).
-    _ACCEPTED_SUFFIXES = {".txt", ".md"}
+    # Collect matching files non-recursively; accepted suffixes are .txt, .md, .pdf
+    # (case-sensitive). PDFs are extracted via load_jd, exactly like single --jd.
+    _ACCEPTED_SUFFIXES = {".txt", ".md", ".pdf"}
     try:
         entries = list(jd_dir.iterdir())
     except OSError:
@@ -212,7 +217,7 @@ def _run_batch(
     )
 
     if not jd_files:
-        print(f"--jd-dir {args.jd_dir!r}: no matching JD files (*.txt, *.md) found", file=sys.stderr)
+        print(f"--jd-dir {args.jd_dir!r}: no matching JD files (*.txt, *.md, *.pdf) found", file=sys.stderr)
         return 2
 
     # Language: explicit --lang wins; batch mode defaults to "en" (no auto-detect from JD).
@@ -231,6 +236,18 @@ def _run_batch(
         print(f"invalid source: {exc}", file=sys.stderr)
         return 2
 
+    # Preflight: read & validate EVERY JD before the expensive build (codex IR-002),
+    # so a missing pypdf / corrupt / encrypted / oversized PDF fails fast without
+    # wasting source extraction or model work. Loaded text is reused for scoring.
+    jd_loaded: list[tuple[str, str]] = []
+    for jd_path in jd_files:
+        try:
+            # PDFs are extracted the same way as single --jd (text → UTF-8 decode,
+            # PDF → pypdf). fetcher is unused for a local path but required by the sig.
+            jd_loaded.append((jd_path.name, load_jd(str(jd_path), fetcher=fetcher)))
+        except JDFileReadError as exc:
+            print(f"cannot read JD file {jd_path!r}: {exc}", file=sys.stderr)
+            return 2
     # Build the portfolio ONCE.
     try:
         result, n_masked = resolve_and_optionally_mask(
@@ -253,17 +270,9 @@ def _run_batch(
 
     # Score per JD; collect (basename, ScoreResult) pairs.
     batch_results: list[tuple[str, object]] = []
-    for jd_path in jd_files:
-        try:
-            jd_text = jd_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            print(f"cannot read JD file {jd_path!r}: {exc}", file=sys.stderr)
-            return 1
-        except UnicodeError as exc:
-            print(f"cannot decode JD file {jd_path!r}: {exc}", file=sys.stderr)
-            return 1
+    for name, jd_text in jd_loaded:
         score_result = score_fit(portfolio, jd_text)
-        batch_results.append((jd_path.name, score_result))
+        batch_results.append((name, score_result))
 
     # Grounding summary → stderr, exactly once.
     grounding = result.grounding

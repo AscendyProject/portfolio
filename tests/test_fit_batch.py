@@ -112,7 +112,7 @@ def test_jd_dir_happy_path(tmp_path, capsys):
 
 
 def test_jd_dir_extension_filter(tmp_path, capsys):
-    """'--jd-dir scans <dir> non-recursively; accepts ONLY .txt and .md (case-sensitive);
+    """'--jd-dir scans <dir> non-recursively; accepts ONLY .txt, .md, .pdf (case-sensitive);
     ignores .json, .txt.bak, and subdirectories.'"""
     (tmp_path / "job.txt").write_text("python backend", encoding="utf-8")
     (tmp_path / "other.md").write_text("java spring", encoding="utf-8")
@@ -536,11 +536,10 @@ def test_batch_fetcher_passed_through(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_jd_file_invalid_utf8_exits_1(tmp_path, capsys):
-    """'Matching JD files are read without handling UnicodeError. An invalid-UTF-8
-    file raises an uncaught exception after the expensive portfolio build. Return
-    a clean nonzero error without a traceback and test both cases.'
-    Traces to IR-002 (UnicodeError case)."""
+def test_jd_file_invalid_utf8_exits_2(tmp_path, capsys):
+    """An invalid-UTF-8 JD file is rejected in the BEFORE-build preflight (codex
+    IR-002), so it exits 2 (input error) without wasting the portfolio build, with
+    a clean nonzero error and no traceback."""
     # Write a file with invalid UTF-8 bytes
     bad_file = tmp_path / "bad.txt"
     bad_file.write_bytes(b"python backend \xff\xfe invalid")
@@ -552,7 +551,7 @@ def test_jd_file_invalid_utf8_exits_1(tmp_path, capsys):
         grader_runner=_make_grader_runner(80),
     )
     captured = capsys.readouterr()
-    assert code == 1
+    assert code == 2
     assert "Traceback" not in captured.err
     # At least one non-empty stderr line about the failure
     assert captured.err.strip() != ""
@@ -739,7 +738,7 @@ def test_batch_default_lang_en_without_lang_flag(tmp_path, capsys):
     reason="chmod(0o000) does not revoke read permission on Windows, so the OSError "
     "path cannot be induced here; this case is covered on POSIX/CI.",
 )
-def test_jd_file_oserror_exits_1(tmp_path, capsys):
+def test_jd_file_oserror_exits_2(tmp_path, capsys):
     """'An unreadable JD file (OSError) must return a clean nonzero error without
     a traceback.'
     Traces to IR-002 (OSError case)."""
@@ -756,12 +755,64 @@ def test_jd_file_oserror_exits_1(tmp_path, capsys):
             grader_runner=_make_grader_runner(80),
         )
         captured = capsys.readouterr()
-        assert code == 1
+        assert code == 2
         assert "Traceback" not in captured.err
         assert captured.err.strip() != ""
     finally:
         # Restore permissions so tmp_path cleanup works
         jd_file.chmod(0o644)
+
+
+def test_batch_picks_up_and_extracts_pdf_jd(tmp_path, capsys, monkeypatch):
+    """A PDF JD in --jd-dir is matched and extracted the same way as single --jd
+    (via load_jd → pypdf), so batch mode is consistent with single mode (#70).
+    A fake pypdf stands in for the optional dependency."""
+    import types
+
+    module = types.ModuleType("pypdf")
+
+    class _Page:
+        def extract_text(self) -> str:
+            return "python backend kubernetes"
+
+    class PdfReader:
+        def __init__(self, _stream) -> None:
+            self.is_encrypted = False
+            self.pages = [_Page()]
+
+    module.PdfReader = PdfReader  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pypdf", module)
+
+    (tmp_path / "role.pdf").write_bytes(b"%PDF-1.4 fake pdf bytes")
+    (tmp_path / "other.txt").write_text("python backend", encoding="utf-8")
+
+    code = run(
+        _base_batch_argv(str(tmp_path), lang="en"),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_make_grader_runner(80),
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "role.pdf" in out  # the PDF JD is included in the ranked batch output
+
+
+def test_batch_missing_pypdf_on_pdf_jd_errors_cleanly(tmp_path, capsys, monkeypatch):
+    """A .pdf in --jd-dir without pypdf installed fails with a clear error (the same
+    optional-dependency message as single --jd), not a traceback."""
+    monkeypatch.setitem(sys.modules, "pypdf", None)  # import pypdf → ImportError
+    (tmp_path / "role.pdf").write_bytes(b"%PDF-1.4 fake pdf bytes")
+
+    code = run(
+        _base_batch_argv(str(tmp_path), lang="en"),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_make_grader_runner(80),
+    )
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "pypdf" in captured.err
+    assert "Traceback" not in captured.err
 
 
 # ---------------------------------------------------------------------------

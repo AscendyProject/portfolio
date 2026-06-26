@@ -6,6 +6,63 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **PDF job-description files for `--jd`** (`resume` / `fit`) — a local `--jd` is now
+  detected by its `%PDF-` signature (not the extension) and its text extracted, so a
+  PDF JD works without converting first. Extraction uses `pypdf`, gated behind an
+  optional `pdf` extra (`pip install 'portfolio[pdf]'`) and imported lazily so the
+  core install stays dependency-free; without it, a PDF `--jd` gives a clear,
+  actionable error. A scanned/image-only PDF (no extractable text) is rejected
+  rather than silently producing an empty JD (#66).
+- **`fit --jd-dir` reads PDFs too** — batch mode now globs `*.pdf` alongside
+  `*.txt`/`*.md` and extracts each through the same `load_jd` path as single
+  `--jd`, so a directory of PDF JDs is scored consistently (#70).
+
+### Security
+- **IR-001 — refuse before the first model call:** `resolve_and_optionally_mask`
+  now runs the masking guard (`assert_maskable`) on extracted evidence **before**
+  any call to the narrate runner or synthesis runner. Previously the guard ran
+  after `narrate`, meaning a private GHES repo's raw evidence could be sent to the
+  model before the run was refused. The new ordering is:
+  `extract → assert_maskable → narrate → ground → mask → synthesize`. When the
+  guard raises `MaskingError` no model call has been made; verified by a
+  counting-runner test that asserts call-count == 0 for both runners.
+- **IR-003 — close the ref-based GHES bypass:** `assert_maskable` now also
+  inspects the host label encoded in `ev.ref` in addition to `ev.url`. Evidence
+  with an empty `url` but a GHES-style ref (`ghe.host.com/owner/repo#n` — three or
+  more segments before `#` / `:`) is refused with `MaskingError`, so there is no
+  url-less bypass of the fail-closed guard. The `article` exemption is preserved.
+- **GHES host parsing hardened against IP-literal and authority-spoofing inputs**
+  (IR-002 / IR-005) — `parse_github_source` now rejects IP-literal hosts in any
+  notation (canonical IPv4, legacy short-form, octal, hex, mixed-base, and IPv6
+  literals), userinfo in the authority (`user@host`, `github.com@evil.example`),
+  and explicit ports (numeric, empty, nonnumeric, out-of-range), all with a
+  `ValueError` before any `gh` invocation. Well-formed external DNS GHES hosts and
+  all github.com URLs are unchanged. This is syntax-level hardening; a DNS name
+  that resolves to an internal IP is not blocked here.
+- **PDF `--jd` input limits** (codex IR-001) — a PDF/file job description is now
+  bounded against resource exhaustion: file size ≤ 20 MiB (checked via `stat`
+  before the bytes are read), ≤ 500 pages, ≤ 2M extracted characters (each page
+  rejected immediately if it would exceed the cap, before accumulation), and
+  encrypted PDFs are refused. A malicious or malformed local PDF can no longer
+  drive memory/CPU exhaustion. (`pypdf`'s `extract_text()` is not streamable, so a
+  single page is still materialized before measurement; full subprocess/timeout
+  isolation is a documented follow-up.)
+
+### Changed
+- **`fit --jd-dir` validates every JD before building** (codex IR-002) — batch mode
+  now reads/validates all JD files up front, so a bad / encrypted / oversized JD
+  fails fast with exit 2 instead of after the expensive portfolio build; the loaded
+  text is reused for scoring (no double read).
+- **Rating stack-diversity taxonomy expanded; `.h` no longer double-counts C/C++**
+  (codex IR-006) — added common languages previously dropped to `other` (Vue,
+  Svelte, Objective-C, F#, Solidity, Zig, Julia, Perl, Groovy, Erlang, Nim, OCaml,
+  Elm, Crystal), so real work in them now counts toward diversity instead of
+  scoring zero. Header extensions (`.h`/`.hpp`/`.hh`/`.hxx`) are excluded from the
+  diversity COUNT (a header follows its companion source), so a `.cpp`+`.h`
+  project is C++ once, not C + C++; headers still resolve to a display language via
+  `language_for_ref`. Extension-precedence only — no content detection.
+
 ## [0.5.0] — 2026-06-24
 
 A rating that finally discriminates at the top: the grade now comes from a single

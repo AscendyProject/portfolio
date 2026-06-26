@@ -185,6 +185,58 @@ def test_metric_stack_diversity_uses_pinned_table():
     assert result.dimensions["stack_diversity"].value == 3
 
 
+def test_diversity_counts_added_languages_ir006():
+    """codex IR-006: real languages newly added to the table (Vue/Solidity/Zig)
+    are counted in diversity instead of dropping to 'other' (under-count fix)."""
+    evidence = [
+        Evidence(kind="file", ref="src/App.vue"),
+        Evidence(kind="file", ref="contracts/Token.sol"),
+        Evidence(kind="file", ref="main.zig"),
+    ]
+    portfolio = Portfolio(subject="bob", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["stack_diversity"].value == 3  # Vue, Solidity, Zig
+
+
+def test_cpp_with_header_counts_cpp_once_ir006():
+    """codex IR-006: a C++ project's .cpp + .h is ONE language (C++), not two
+    (C and C++) — the header is excluded from the diversity count."""
+    evidence = [
+        Evidence(kind="file", ref="src/engine.cpp"),
+        Evidence(kind="file", ref="src/engine.h"),
+    ]
+    portfolio = Portfolio(subject="bob", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["stack_diversity"].value == 1  # C++ only; .h header skipped
+
+
+def test_c_with_header_counts_c_once_ir006():
+    """A C project's .c + .h counts C once (header excluded), not inflated."""
+    evidence = [
+        Evidence(kind="file", ref="src/main.c"),
+        Evidence(kind="file", ref="src/main.h"),
+    ]
+    portfolio = Portfolio(subject="bob", evidence=evidence, claims=[])
+    result = profile(portfolio)
+    assert result.dimensions["stack_diversity"].value == 1  # C only
+    # Discriminating (codex IR-001): the header is EXCLUDED from the counted refs.
+    # Pre-change `.h` mapped to C and WAS counted, so it appeared in evidence_refs;
+    # the count stayed 1 either way, so the ref assertion is what fails pre-change.
+    div_refs = result.dimensions["stack_diversity"].evidence_refs
+    assert "src/main.h" not in div_refs
+    assert "src/main.c" in div_refs
+
+
+def test_language_for_ref_still_resolves_headers_ir006():
+    """Headers still resolve to a display language via language_for_ref even though
+    they are excluded from the diversity count."""
+    from rating.profile import language_for_ref
+
+    assert language_for_ref("src/engine.h") == "C"
+    assert language_for_ref("src/App.vue") == "Vue"
+    assert language_for_ref("contracts/Token.sol") == "Solidity"
+
+
 def test_unknown_extension_not_counted_in_diversity():
     """An unmapped extension is "other" and does NOT count toward stack diversity
     (we do not credit what we cannot name; this is also how config/junk files are

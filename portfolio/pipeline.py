@@ -104,7 +104,9 @@ def resolve_and_optionally_mask(
     """Returns (BuildResult, n_masked). n_masked is 0 when mask_private=False.
 
     When mask_private=True, orders work as:
-    extract → narrate → ground → mask → synthesize (post-scrub).
+    extract → assert_maskable → narrate → ground → mask → synthesize (post-scrub).
+    assert_maskable fires before any model call (runner or synthesis_runner) so a
+    private GHES repo's raw evidence is never sent to the model (IR-001).
     """
     if not mask_private:
         result = resolve_to_build_result(
@@ -117,16 +119,6 @@ def resolve_and_optionally_mask(
         )
         return result, 0
 
-    # mask_private=True: run pipeline WITHOUT synthesis first
-    no_synth_result = resolve_to_build_result(
-        resolved,
-        subject=subject,
-        runner=runner,
-        max_claims=max_claims,
-        synthesis_runner=None,
-        lang=lang,
-    )
-
     # Import masking functions here to avoid circular imports
     from .mask import (
         _build_relabel_map,
@@ -138,9 +130,38 @@ def resolve_and_optionally_mask(
         private_repos,
     )
 
-    # Fail closed before discovery: refuse rather than under-mask evidence from a
-    # host the masking path can't handle (e.g. GitHub Enterprise Server).
-    assert_maskable(no_synth_result.portfolio)
+    # IR-001 ordering fix: assert_maskable must run BEFORE any model call so a
+    # private GHES repo's raw evidence is never sent to a runner.
+    # Extract evidence first (or use prebuilt), build a minimal guard Portfolio,
+    # check it, then proceed to narrate/synthesize on the already-cleared evidence.
+    _prebuilt = getattr(resolved, "prebuilt", None)
+    if _prebuilt is not None:
+        _pre_evidence = list(_prebuilt.evidence)
+    else:
+        _pre_evidence = resolved.extract()
+
+    assert_maskable(Portfolio(subject=subject, evidence=_pre_evidence, claims=[]))
+
+    # Narrate + ground on the already-verified evidence (model call via runner).
+    # For prebuilt portfolios only deterministic check_claims runs here, not runner.
+    if _prebuilt is not None:
+        no_synth_result = resolve_to_build_result(
+            resolved,
+            subject=subject,
+            runner=runner,
+            max_claims=max_claims,
+            synthesis_runner=None,
+            lang=lang,
+        )
+    else:
+        no_synth_result = build_from_evidence(
+            subject=subject,
+            evidence=_pre_evidence,
+            runner=runner,
+            max_claims=max_claims,
+            synthesis_runner=None,
+            lang=lang,
+        )
 
     lk = visibility_lookup if visibility_lookup is not None else _gh_visibility_lookup
     repos = extract_repo_names(no_synth_result.portfolio)
