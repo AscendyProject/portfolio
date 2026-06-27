@@ -7,6 +7,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **GHES private repos are now MASKED end-to-end for `--mask-private`, not
+  refused (IR-004)** — previously `assert_maskable` failed closed on any
+  non-github.com host, so a developer split across github.com and a GitHub
+  Enterprise Server instance could not anonymize the GHES half. Now well-formed
+  GHES identities (URL or `host/owner/repo` ref) flow through discovery,
+  visibility lookup, and relabeling exactly like github.com repos. The guard is
+  relaxed to a true final invariant: it refuses **only a malformed identity** the
+  masking layer cannot decompose (unparseable/absent URL host, a URL path with no
+  `owner/repo`, or a host-qualified ref that does not yield a valid
+  `host/owner/repo`). Visibility-lookup failure is not a refusal — the fail-safe
+  treats it as private and masks. Free text is scrubbed of both the full
+  `host/owner/repo` and the bare `owner/repo` form of a masked GHES repo, so a
+  GHES name cannot leak via `detail` / `context` / `claim.text`.
+- **GHES host-qualified discovery for `--mask-private` (IR-004)** —
+  `extract_repo_names` now discovers repo identities from any DNS host, not
+  just github.com.  Non-github.com repos are keyed as `host/owner/repo`
+  (lowercase); github.com repos keep the existing bare `owner/repo` key for
+  full backward compatibility — github.com masking output is byte-identical to
+  the previous release for all existing tests.  The single changed expectation
+  is `test_extract_non_github_url_yields_nothing`, which now asserts the
+  host-qualified key is collected rather than an empty set.
+- **Host-aware visibility lookup** — `_gh_visibility_lookup` now accepts both
+  bare `OWNER/REPO` (github.com) and `HOST/OWNER/REPO` (GHES) keys; the
+  `gh repo view` argv is the same shape, with the full host-qualified path for
+  GHES repos.  The fail-safe (exception / non-zero exit / malformed JSON →
+  treat as private) applies identically to GHES hosts.
+- **Case-insensitive relabeling** — `_rewrite_ref`, `_rewrite_text`, and the
+  URL rewrite pass in `mask_portfolio` now use case-insensitive matching, so
+  mixed-case occurrences of a private repo name in `ref`, `url`, `detail`,
+  `context`, `claim.text`, and `claim.evidence_refs` are all replaced.
+  Owner/repo identity is normalized to lowercase, so `Owner/Repo` and
+  `owner/repo` map to a single key per host.
 - **PDF job-description files for `--jd`** (`resume` / `fit`) — a local `--jd` is now
   detected by its `%PDF-` signature (not the extension) and its text extracted, so a
   PDF JD works without converting first. Extraction uses `pypdf`, gated behind an
@@ -27,11 +59,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `extract → assert_maskable → narrate → ground → mask → synthesize`. When the
   guard raises `MaskingError` no model call has been made; verified by a
   counting-runner test that asserts call-count == 0 for both runners.
-- **IR-003 — close the ref-based GHES bypass:** `assert_maskable` now also
-  inspects the host label encoded in `ev.ref` in addition to `ev.url`. Evidence
-  with an empty `url` but a GHES-style ref (`ghe.host.com/owner/repo#n` — three or
-  more segments before `#` / `:`) is refused with `MaskingError`, so there is no
-  url-less bypass of the fail-closed guard. The `article` exemption is preserved.
+- **IR-003 — inspect the host label encoded in `ev.ref`:** `assert_maskable`
+  inspects both `ev.url` and the host label encoded in `ev.ref`, so a url-less
+  GHES-style ref (`ghe.host.com/owner/repo#n` — three or more segments before
+  `#` / `:`) is never silently passed through. A **well-formed** such ref is now
+  masked (see the GHES masking entry above); only a **malformed** host-qualified
+  ref trips the fail-closed guard. The `article` exemption is preserved.
 - **GHES host parsing hardened against IP-literal and authority-spoofing inputs**
   (IR-002 / IR-005) — `parse_github_source` now rejects IP-literal hosts in any
   notation (canonical IPv4, legacy short-form, octal, hex, mixed-base, and IPv6

@@ -336,26 +336,44 @@ python -m reference_check --source-type github-author --author <handle> --mask-p
 When `--mask-private` is set:
 
 1. Evidence is extracted first and the masking guard (`assert_maskable`) runs
-   **before any model call**. If the evidence contains a non-github.com host — in
-   either `ev.url` or the host label encoded in `ev.ref` (e.g. a GHES ref like
-   `ghe.example.com/owner/repo#1`) — the run is refused immediately with a clear
-   error, and the model is never invoked. This guarantees that no private GHES
-   evidence is ever sent to the model (IR-001).
+   **before any model call**. The guard accepts every *well-formed* repo identity —
+   github.com **and** GitHub Enterprise Server (or any other DNS host) — so that all
+   of them flow into discovery and masking. It refuses **only a malformed identity**
+   the masking layer cannot decompose: a URL whose host does not parse or whose path
+   has no recognizable `owner/repo`, or a host-qualified `ev.ref` that cannot be
+   decomposed into `host/owner/repo`. A refusal stops the run with a clear error
+   before the model is ever invoked, so no private evidence is sent to the model and
+   nothing maskable is silently skipped.
 2. The narrate → ground pipeline then runs on the already-checked evidence.
-3. Every `owner/repo` found in structured evidence fields (`ref`, `url`) and claim
+3. Every repo identity found in structured evidence fields (`ref`, `url`) and claim
    `evidence_refs` is looked up via `gh repo view --json isPrivate`.
+   - github.com repos are looked up as `OWNER/REPO`.
+   - Non-github.com repos (GHES and other hosts) are collected as `HOST/OWNER/REPO`
+     keys; discovery is host-agnostic and case-insensitive.
 4. Private repos are relabeled `private-repo-1`, `private-repo-2`, … (sorted by name
    for determinism). Every occurrence in `ref`, `url`, `detail`, `context`, `claim.text`,
-   and `claim.evidence_refs` is rewritten using the same map.
+   and `claim.evidence_refs` is rewritten using the same map (case-insensitive).
 5. Synthesis (if enabled) runs on the already-masked portfolio; the model's output text is
    scrubbed again after synthesis so any private name the model emitted on its own is removed.
 6. A summary line `masked N private repo(s)` is printed to stderr.
 
 **Fail-closed guard:** the guard inspects both `ev.url` (URL-based host) and `ev.ref`
-(ref-encoded host label). Evidence with an empty `url` but a GHES-style ref
-(`ghe.host.com/owner/repo#n`) is refused just like evidence with a GHES URL — there
-is no ref-based bypass. Only `article` evidence (public web content with no GitHub repo
-to mask) is exempt from this check.
+(ref-encoded host label), but it no longer refuses by host. A well-formed GHES URL or
+ref (`ghe.host.com/owner/repo#n`, with or without a `url`) is **masked**, not refused.
+The guard fails closed only on a *malformed* identity it cannot decompose — an
+unparseable/absent URL host, a URL path with no `owner/repo`, or a host-qualified ref
+that does not yield a valid `host/owner/repo`. Visibility-lookup failures are **not** a
+refusal: they are handled downstream by the fail-safe (treat as private → mask). Only
+`article` evidence (public web content with no GitHub repo to mask) is exempt.
+
+**GHES masking (IR-004):** GitHub Enterprise Server private repos are masked
+end-to-end, not refused. `extract_repo_names` discovers repo identities from any DNS
+host — not just github.com — using `host/owner/repo` keys. Visibility is checked via
+`gh repo view HOST/OWNER/REPO`, and the fail-safe (lookup error → treat as private)
+applies equally to GHES hosts, so an unreachable/unauthenticated host masks rather than
+leaks. Owner/repo names are case-normalized so `Owner/Repo` and `owner/repo` map to a
+single key. Free text (`detail`, `context`, `claim.text`) is scrubbed of both the full
+`host/owner/repo` and the bare `owner/repo` form of a masked GHES repo.
 
 **Scope limit:** only literal `owner/repo` substrings are masked — detected from structured
 fields only (`evidence.ref`, `evidence.url`, `claim.evidence_refs`). Semantic project names
