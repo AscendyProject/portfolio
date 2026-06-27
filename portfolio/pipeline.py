@@ -104,9 +104,10 @@ def resolve_and_optionally_mask(
     """Returns (BuildResult, n_masked). n_masked is 0 when mask_private=False.
 
     When mask_private=True, orders work as:
-    extract → assert_maskable → narrate → ground → mask → synthesize (post-scrub).
-    assert_maskable fires before any model call (runner or synthesis_runner) so a
-    private GHES repo's raw evidence is never sent to the model (IR-001).
+    extract → assert_maskable → discover → visibility → mask evidence → narrate →
+    ground → synthesize (post-scrub). Both the guard AND the relabeling run before
+    any model call (runner or synthesis_runner), so a private repo's raw evidence
+    (github.com or GHES) is never sent to the model (IR-001).
     """
     if not mask_private:
         result = resolve_to_build_result(
@@ -130,21 +131,19 @@ def resolve_and_optionally_mask(
         private_repos,
     )
 
-    # IR-001 ordering fix: assert_maskable must run BEFORE any model call so a
-    # private GHES repo's raw evidence is never sent to a runner.
-    # Extract evidence first (or use prebuilt), build a minimal guard Portfolio,
-    # check it, then proceed to narrate/synthesize on the already-cleared evidence.
+    # IR-001 invariant: BOTH assert_maskable AND the actual relabeling run BEFORE
+    # any narrate/synthesis model call, so a private repo's raw evidence (github.com
+    # OR GHES) is never placed in a model prompt. assert_maskable only fails closed
+    # on a malformed identity — it does not relabel — so masking the evidence ahead
+    # of narrate is what actually keeps raw private names out of the prompt.
+    lk = visibility_lookup if visibility_lookup is not None else _gh_visibility_lookup
     _prebuilt = getattr(resolved, "prebuilt", None)
-    if _prebuilt is not None:
-        _pre_evidence = list(_prebuilt.evidence)
-    else:
-        _pre_evidence = resolved.extract()
 
-    assert_maskable(Portfolio(subject=subject, evidence=_pre_evidence, claims=[]))
-
-    # Narrate + ground on the already-verified evidence (model call via runner).
-    # For prebuilt portfolios only deterministic check_claims runs here, not runner.
     if _prebuilt is not None:
+        # Prebuilt 'portfolio' source: the build is deterministic (check_claims, no
+        # narrate runner), so no model call ever sees the evidence. Guard, build,
+        # then mask the whole portfolio (evidence + claims).
+        assert_maskable(Portfolio(subject=subject, evidence=list(_prebuilt.evidence), claims=[]))
         no_synth_result = resolve_to_build_result(
             resolved,
             subject=subject,
@@ -153,21 +152,35 @@ def resolve_and_optionally_mask(
             synthesis_runner=None,
             lang=lang,
         )
+        repos = extract_repo_names(no_synth_result.portfolio)
+        priv = private_repos(repos, visibility_lookup=lk)
+        relabel = _build_relabel_map(priv)
+        masked_portfolio = mask_portfolio(no_synth_result.portfolio, priv)
     else:
+        # Live extraction → the narrate runner WILL receive the evidence, so the
+        # evidence must be masked BEFORE build_from_evidence. Discover + relabel on
+        # the raw evidence, mask it, then narrate over the masked evidence; the
+        # grounded claims therefore reference only the masked identities.
+        _pre_evidence = resolved.extract()
+        _guard = Portfolio(subject=subject, evidence=_pre_evidence, claims=[])
+        assert_maskable(_guard)
+        repos = extract_repo_names(_guard)
+        priv = private_repos(repos, visibility_lookup=lk)
+        relabel = _build_relabel_map(priv)
+        masked_evidence = mask_portfolio(_guard, priv).evidence
         no_synth_result = build_from_evidence(
             subject=subject,
-            evidence=_pre_evidence,
+            evidence=masked_evidence,
             runner=runner,
             max_claims=max_claims,
             synthesis_runner=None,
             lang=lang,
         )
-
-    lk = visibility_lookup if visibility_lookup is not None else _gh_visibility_lookup
-    repos = extract_repo_names(no_synth_result.portfolio)
-    priv = private_repos(repos, visibility_lookup=lk)
-    masked_portfolio = mask_portfolio(no_synth_result.portfolio, priv)
-    relabel = _build_relabel_map(priv)
+        # Defense in depth: the narrate model saw only masked evidence, but re-apply
+        # masking to the narrated portfolio so any private name the model emitted on
+        # its own (claim text/refs) is scrubbed too. Evidence is already masked, so
+        # this is idempotent for it; the post-narrate pass only touches the claims.
+        masked_portfolio = mask_portfolio(no_synth_result.portfolio, priv)
 
     # Run synthesis on the masked portfolio (if requested)
     synthesis: SynthesisResult | None = None

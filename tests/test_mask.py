@@ -184,13 +184,13 @@ def test_extract_claim_evidence_refs_file_form():
 
 
 def test_extract_non_github_url_yields_nothing():
-    """Non-github.com URL yields no candidate."""
+    """Non-github.com URL is collected as a host-qualified key by extract_repo_names."""
     p = Portfolio(
         subject="alice",
         evidence=[Evidence(kind="pr", ref="PR#5", url="https://gitlab.com/acme/svc/pull/5")],
         claims=[],
     )
-    assert extract_repo_names(p) == set()
+    assert extract_repo_names(p) == {"gitlab.com/acme/svc"}
 
 
 def test_extract_multiple_repos():
@@ -521,7 +521,9 @@ def test_grounding_invariant():
 
 
 def test_pre_synthesis_ordering_and_post_scrub():
-    """Synthesis runs on the masked portfolio; post-scrub removes private name from output."""
+    """Evidence is masked BEFORE narrate (IR-001), so the narrate runner sees only the
+    masked ref and cites it; synthesis runs on the masked portfolio; post-scrub removes
+    any private name the synthesis model emitted in free text."""
     from portfolio.pipeline import resolve_and_optionally_mask
     from portfolio.sources import ResolvedSource
 
@@ -531,9 +533,14 @@ def test_pre_synthesis_ordering_and_post_scrub():
 
     resolved = ResolvedSource(subject="alice", extract=fake_extract)
 
-    # Fake narration runner: returns a claim grounded on the private repo ref
+    # Fake narration runner: it is handed the ALREADY-MASKED evidence, so it cites the
+    # masked ref "private-repo-1#1" (the raw "acme/svc" is never in its prompt). It also
+    # emits the raw name in claim text to exercise the post-narrate defense-in-depth scrub.
     def fake_runner(prompt: str) -> str:
-        return json.dumps([{"text": "Built acme/svc feature", "evidence_refs": ["acme/svc#1"], "confidence": 0.9}])
+        assert "acme/svc" not in prompt, "raw private repo leaked into the narrate prompt (IR-001)"
+        return json.dumps(
+            [{"text": "Built acme/svc feature", "evidence_refs": ["private-repo-1#1"], "confidence": 0.9}]
+        )
 
     # Fake synthesis runner: returns output TEXT literally containing "acme/svc"
     # The synthesis runner here receives masked portfolio, so refs are "private-repo-1#1"
@@ -558,6 +565,10 @@ def test_pre_synthesis_ordering_and_post_scrub():
     )
 
     assert n_masked == 1
+    # Post-narrate defense-in-depth: the raw name the model emitted in claim text is
+    # scrubbed from the returned portfolio.
+    for cl in result.portfolio.claims:
+        assert "acme/svc" not in cl.text
     assert result.synthesis is not None
     # headline must not contain private name
     assert "acme/svc" not in (result.synthesis.headline or "")
@@ -601,7 +612,13 @@ def _fake_github_extractor(*, repo: str, author: str, limit: int = 100) -> list[
 
 
 def _fake_runner_for_private(prompt: str) -> str:
-    return json.dumps([{"text": "Built feature in acme/svc", "evidence_refs": ["acme/svc#1"], "confidence": 0.9}])
+    # A realistic runner cites whatever ref the prompt actually shows. Under
+    # --mask-private the evidence is masked BEFORE narrate (IR-001), so the prompt
+    # shows "private-repo-1#1"; without masking it shows the raw "acme/svc#1".
+    masked = "private-repo-1" in prompt
+    ref = "private-repo-1#1" if masked else "acme/svc#1"
+    name = "private-repo-1" if masked else "acme/svc"
+    return json.dumps([{"text": f"Built feature in {name}", "evidence_refs": [ref], "confidence": 0.9}])
 
 
 def test_portfolio_cli_mask_private(capsys):
@@ -978,11 +995,13 @@ def test_post_synthesis_scrub_overlap():
     resolved = ResolvedSource(subject="x", extract=fake_extract)
 
     def fake_runner(prompt: str) -> str:
+        # Evidence is masked before narrate (IR-001): the runner sees only the masked
+        # refs and cites them. org/repo → private-repo-1, org/repo-tools → private-repo-2.
         return json.dumps(
             [
                 {
-                    "text": "Built org/repo and org/repo-tools",
-                    "evidence_refs": ["org/repo#1", "org/repo-tools#2"],
+                    "text": "Built private-repo-1 and private-repo-2",
+                    "evidence_refs": ["private-repo-1#1", "private-repo-2#2"],
                     "confidence": 0.9,
                 }
             ]
@@ -1076,10 +1095,10 @@ def test_resume_cli_show_refs_and_mask_private(tmp_path, capsys):
     jd.write_text("backend engineer python", encoding="utf-8")
 
     def backend_runner_for_private(prompt: str) -> str:
-        # Claim text matches JD keywords (backend, python) and cites the private ref
-        return json.dumps(
-            [{"text": "Built backend python service", "evidence_refs": ["acme/svc#1"], "confidence": 0.9}]
-        )
+        # Claim text matches JD keywords (backend, python) and cites the ref the prompt
+        # shows — masked (IR-001) under --mask-private, raw otherwise.
+        ref = "private-repo-1#1" if "private-repo-1" in prompt else "acme/svc#1"
+        return json.dumps([{"text": "Built backend python service", "evidence_refs": [ref], "confidence": 0.9}])
 
     code = run(
         [
@@ -1182,9 +1201,10 @@ def test_reference_check_cli_show_refs_and_mask_private(capsys):
     def rc_runner(prompt: str) -> str:
         call_count[0] += 1
         if call_count[0] == 1:
-            # Narration phase: return claim citing the private ref (will be masked)
+            # Narration phase: evidence is masked before narrate (IR-001), so the prompt
+            # shows the masked ref and the runner cites it.
             return json.dumps(
-                [{"text": "Built feature in acme/svc", "evidence_refs": ["acme/svc#1"], "confidence": 0.9}]
+                [{"text": "Built feature in private-repo-1", "evidence_refs": ["private-repo-1#1"], "confidence": 0.9}]
             )
         # Letter phase: cite the already-masked ref
         return json.dumps([{"text": "Developer improved performance.", "evidence_refs": ["private-repo-1#1"]}])
@@ -1218,15 +1238,15 @@ def test_reference_check_cli_show_refs_and_mask_private(capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_assert_maskable_raises_for_ghes_host():
-    """A GitHub Enterprise Server evidence URL makes masking refuse (fail closed)."""
+def test_assert_maskable_accepts_well_formed_ghes_host():
+    """A well-formed GHES URL is now ACCEPTED by assert_maskable (task-028 IR-004):
+    GHES repos are masked via host-aware discovery + visibility lookup, not refused."""
     p = Portfolio(
         subject="alice",
         evidence=[Evidence(kind="pr", ref="PR#1", url="https://ghe.example.com/owner/repo/pull/1")],
         claims=[],
     )
-    with pytest.raises(MaskingError, match="ghe.example.com"):
-        assert_maskable(p)
+    assert_maskable(p)  # must not raise — well-formed GHES URL is maskable
 
 
 def test_www_github_url_is_discovered_and_masked():
@@ -1276,15 +1296,16 @@ def test_assert_maskable_allows_github_com_and_bare_refs():
     assert_maskable(p)  # must not raise
 
 
-def test_rating_cli_mask_private_fails_closed_on_ghes(tmp_path, capsys):
-    """End-to-end: --mask-private over a portfolio with a GHES URL exits non-zero
-    with a clear error, and never emits the GHES repo unmasked."""
+def test_rating_cli_mask_private_fails_closed_on_malformed_url(tmp_path, capsys):
+    """End-to-end: --mask-private over a portfolio with a MALFORMED URL (no owner/repo
+    in path) exits non-zero with a clear error — the new fail-closed contract
+    (task-028 IR-004) refuses malformed identities rather than all non-github.com hosts."""
     from portfolio.store import portfolio_to_json
     from rating.cli import run
 
     p = Portfolio(
         subject="alice",
-        evidence=[Evidence(kind="pr", ref="PR#1", url="https://ghe.example.com/acme/secret/pull/1", detail="work")],
+        evidence=[Evidence(kind="pr", ref="PR#1", url="https://example.com/single-segment", detail="work")],
         claims=[Claim(text="did work", evidence_refs=["PR#1"], confidence=0.9, grounded=True)],
     )
     portfolio_file = tmp_path / "p.json"
@@ -1295,9 +1316,8 @@ def test_rating_cli_mask_private_fails_closed_on_ghes(tmp_path, capsys):
         visibility_lookup=lambda repo: True,
     )
     captured = capsys.readouterr()
-    assert code != 0  # refused, not a silent "masked 0"
-    assert "ghe.example.com" in captured.err  # clear reason on stderr
-    assert "acme/secret" not in captured.out  # never emitted unmasked
+    assert code != 0  # malformed identity → refused
+    assert "single-segment" not in captured.out  # never emitted unmasked
 
 
 # ---------------------------------------------------------------------------
@@ -1306,9 +1326,13 @@ def test_rating_cli_mask_private_fails_closed_on_ghes(tmp_path, capsys):
 
 
 def test_mask_private_runner_not_called_when_assert_maskable_raises():
-    """When assert_maskable raises on the mask_private=True path, neither runner
-    nor synthesis_runner is ever called — proven by counting fakes.
-    Call-count must be 0 for both (IR-001 ordering guarantee)."""
+    """When assert_maskable raises on a MALFORMED identity, neither runner nor
+    synthesis_runner is ever called — proven by counting fakes.
+    Call-count must be 0 for both (IR-001 ordering guarantee).
+
+    Uses a URL with a single-segment path (no owner/repo) as the malformed trigger;
+    this is the new fail-closed contract (task-028 IR-004 relaxed the GHES host
+    refusal — well-formed GHES is now masked, not refused)."""
     from portfolio.pipeline import resolve_and_optionally_mask
     from portfolio.sources import ResolvedSource
 
@@ -1324,8 +1348,8 @@ def test_mask_private_runner_not_called_when_assert_maskable_raises():
         return "{}"
 
     def fake_extract():
-        # Evidence with a GHES URL — assert_maskable must refuse this
-        return [Evidence(kind="pr", ref="PR#1", url="https://ghe.example.com/owner/repo/pull/1")]
+        # Malformed URL: single-segment path → no owner/repo → assert_maskable raises
+        return [Evidence(kind="pr", ref="PR#1", url="https://example.com/single-segment")]
 
     resolved = ResolvedSource(subject="alice", extract=fake_extract)
 
@@ -1347,16 +1371,16 @@ def test_mask_private_runner_not_called_when_assert_maskable_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_assert_maskable_raises_for_ghes_ref_without_url():
-    """A GHES-style ref (host/owner/repo#n) with empty url still trips the
-    masking guard (IR-003: url-less GHES ref bypass is closed)."""
+def test_assert_maskable_accepts_ghes_ref_without_url():
+    """A well-formed GHES-style ref (host/owner/repo#n) with empty url is now
+    ACCEPTED by assert_maskable (task-028 IR-004): the masking layer now supports
+    host-qualified refs, so they are masked rather than refused."""
     p = Portfolio(
         subject="alice",
         evidence=[Evidence(kind="pr", ref="ghe.example.com/owner/repo#1", url="")],
         claims=[],
     )
-    with pytest.raises(MaskingError, match="ghe.example.com"):
-        assert_maskable(p)
+    assert_maskable(p)  # must not raise — well-formed GHES ref is now maskable
 
 
 def test_assert_maskable_allows_bare_owner_repo_ref_without_url():

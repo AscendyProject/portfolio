@@ -3,6 +3,16 @@
 extract_repo_names  — discover owner/repo from structured fields only
 private_repos       — filter to the private subset via visibility lookup
 mask_portfolio      — return a new Portfolio with private repos relabeled
+
+Identity key format
+-------------------
+github.com repos are keyed as bare ``owner/repo`` (lowercase) for backward
+compatibility.  Repos on any other host (GitHub Enterprise Server or any
+other DNS host) are keyed as ``host/owner/repo`` (lowercase).
+
+Discovery is host-agnostic: any hostname whose URL path contains a valid
+``owner/repo`` is collected; whether masking succeeds at runtime is governed
+by the visibility-lookup fail-safe and the ``assert_maskable`` guard.
 """
 
 from __future__ import annotations
@@ -27,6 +37,9 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _PR_REF_RE = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)$")
 # Matches owner/repo:<non-empty-path>
 _FILE_REF_RE = re.compile(r"^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+):(.+)$")
+# GHES 3-segment variants: host/owner/repo#<digits> and host/owner/repo:<path>
+_GHES_PR_REF_RE = re.compile(r"^([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)#(\d+)$")
+_GHES_FILE_REF_RE = re.compile(r"^([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+):(.+)$")
 # A second segment ending in a common source-file extension is almost certainly a
 # file path mistaken for a repo (e.g. `app/auth.py` in `app/auth.py#5` /
 # `app/auth.py:42`), not a real repository name. We reject these so a bare path is
@@ -67,10 +80,8 @@ _PATH_LIKE_EXTENSIONS = (
 )
 
 _GITHUB_HOST = "github.com"
-# Hosts whose repos the masking path can discover, look up, and relabel. Discovery
-# (extract_repo_names) and the fail-closed guard (assert_maskable) BOTH key off
-# this single set, so a host is never accepted by one and dropped by the other
-# (which would silently under-mask — codex IR-002).
+# Hosts whose repos use the bare 'owner/repo' key (backward compatibility).
+# Non-github.com hosts use the 'host/owner/repo' key instead.
 _MASKABLE_HOSTS = frozenset({_GITHUB_HOST, "www.github.com"})
 
 
@@ -113,30 +124,71 @@ def _parse_ref(ref: str) -> str | None:
     return None
 
 
+def _parse_ghes_ref(ref: str) -> str | None:
+    """Parse a GHES-style host/owner/repo ref, returning 'host/owner/repo' (lowercase).
+
+    Handles:
+      - host/owner/repo#<n>  (GHES PR ref)
+      - host/owner/repo:<path>  (GHES file ref)
+
+    Returns 'host/owner/repo' lowercase string if valid, else None.
+    """
+    m = _GHES_PR_REF_RE.match(ref)
+    if not m:
+        m = _GHES_FILE_REF_RE.match(ref)
+    if not m:
+        return None
+    host, owner, repo = m.group(1), m.group(2), m.group(3)
+    owner_repo = f"{owner}/{repo}"
+    if _is_valid_owner_repo(owner_repo):
+        return f"{host}/{owner_repo}".lower()
+    return None
+
+
 def extract_repo_names(portfolio: Portfolio) -> set[str]:
-    """Discover owner/repo candidates ONLY from structured sources.
+    """Discover repo identities ONLY from structured sources.
+
+    Key format (see module docstring):
+    - github.com repos → bare 'owner/repo' (lowercase)
+    - Any other host  → 'host/owner/repo' (lowercase)
 
     Sources: evidence.ref, evidence.url, claim.evidence_refs entries.
     NOT from evidence.detail, evidence.context, or claim.text (free text).
+
+    Discovery is host-agnostic for URLs: any hostname whose path contains a
+    valid owner/repo pair is collected.  For refs, both the standard two-segment
+    github.com form (owner/repo#n) and the three-segment GHES form
+    (host/owner/repo#n) are recognised.  Whether the resulting key can be
+    actually masked at runtime is decided by the visibility-lookup fail-safe
+    and the assert_maskable guard — not here.
     """
     found: set[str] = set()
 
     for ev in portfolio.evidence:
-        # evidence.ref: may be owner/repo#<n> or owner/repo:<path>
+        # evidence.ref: may be owner/repo#<n> or owner/repo:<path> (2-segment)
+        # or host/owner/repo#<n> / host/owner/repo:<path> (3-segment GHES form)
         result = _parse_ref(ev.ref)
         if result is not None:
-            found.add(result)
+            found.add(result.lower())
+        else:
+            ghes_result = _parse_ghes_ref(ev.ref)
+            if ghes_result is not None:
+                found.add(ghes_result)
 
-        # evidence.url: only hosts the masking path can actually handle
+        # evidence.url: collect from any host (host-agnostic)
         if ev.url:
             try:
                 parsed = urlparse(ev.url)
-                if parsed.hostname in _MASKABLE_HOSTS:
+                host = parsed.hostname
+                if host:
                     segments = [s for s in parsed.path.split("/") if s]
                     if len(segments) >= 2:
                         candidate = f"{segments[0]}/{segments[1]}"
                         if _is_valid_owner_repo(candidate):
-                            found.add(candidate)
+                            if host in _MASKABLE_HOSTS:
+                                found.add(candidate.lower())
+                            else:
+                                found.add(f"{host}/{candidate}".lower())
             except Exception:
                 pass
 
@@ -144,7 +196,11 @@ def extract_repo_names(portfolio: Portfolio) -> set[str]:
         for ref in claim.evidence_refs:
             result = _parse_ref(ref)
             if result is not None:
-                found.add(result)
+                found.add(result.lower())
+            else:
+                ghes_result = _parse_ghes_ref(ref)
+                if ghes_result is not None:
+                    found.add(ghes_result)
 
     return found
 
@@ -175,69 +231,81 @@ def _ref_host(ref: str) -> str | None:
 
 
 def assert_maskable(portfolio: Portfolio) -> None:
-    """Fail closed when --mask-private cannot reliably mask this portfolio.
+    """Fail closed when --mask-private cannot guarantee masking for the given evidence.
 
-    Repo discovery, the `gh repo view` visibility lookup, and relabeling all
-    assume github.com. A GitHub Enterprise Server URL (e.g.
-    `https://ghe.example.com/owner/repo/pull/1`) is therefore neither discovered
-    nor masked, so silently reporting "masked 0 private repo(s)" could emit a
-    private GHES repo unmasked. Refuse instead — under-masking private evidence
-    is worse than refusing the run. Raises MaskingError for the first non-
-    maskable host found.
+    Refuses ONLY when an evidence identity is *malformed* — i.e. the masking-layer
+    discovery path cannot decompose it into a ``(host, owner, repo)`` triple at all:
 
-    Checks both ``ev.url`` (URL-based host) and ``ev.ref`` (ref-encoded host
-    label for url-less GHES evidence — IR-003).
+    - ``ev.url`` is non-empty but ``urlparse(ev.url).hostname`` raises ``ValueError``
+      or yields no host (empty / None).
+    - ``ev.url`` hostname parses but the URL path has no recognizable ``owner/repo``
+      segment (fewer than two non-empty path components, or those components fail
+      ``_is_valid_owner_repo``).
+    - ``ev.ref`` has a host prefix (three-or-more-segment form before ``#`` / ``:``)
+      that does NOT decompose into a valid ``host/owner/repo`` via ``_parse_ghes_ref``
+      (e.g. invalid name characters, path-like extension on the repo segment).
 
-    Only repo-artifact evidence (PRs, files, commits, …) is checked. `article`
-    evidence comes from `--source-type web`: its URL is arbitrary public content,
-    not a repo, and carries no GitHub repo name to mask — so a non-github.com
-    article host is NOT a masking failure and must not trip the guard.
+    Well-formed identities are ACCEPTED:
+
+    - A URL whose hostname parses and whose path yields a valid ``owner/repo`` is
+      accepted regardless of host (github.com OR any GHES / other DNS host).
+    - A ref that ``_parse_ghes_ref`` successfully decomposes into ``host/owner/repo``
+      is accepted; bare two-segment ``owner/repo`` refs (``_ref_host`` returns None)
+      are also accepted.
+
+    Visibility-lookup failures (non-zero exit, malformed JSON, unreachable host) are
+    NOT a refusal — that is the ``private_repos`` fail-safe's job, which treats lookup
+    errors as PRIVATE (mask), never as refusal. Only malformed identities trip this guard.
+
+    Only repo-artifact evidence (PRs, files, commits, …) is checked. ``article``
+    evidence (``--source-type web``) is public content with no repo to mask and is
+    exempt from this check.
     """
     for ev in portfolio.evidence:
         if ev.kind == "article":
             continue  # web article URL is public content, not a maskable repo
 
-        # Check ev.url for a non-github.com host.
+        # Check ev.url: refuse if malformed, accept if well-formed (any host).
         if ev.url:
             try:
-                host = urlparse(ev.url).hostname
+                parsed = urlparse(ev.url)
+                host = parsed.hostname
             except ValueError:
-                host = None  # an unparseable URL yields no repo to mask anyway
-            if host and host not in _MASKABLE_HOSTS:
+                host = None
+            if not host:
                 raise MaskingError(
-                    f"--mask-private does not support host {host!r} (only github.com): "
-                    f"private repos on GitHub Enterprise Server cannot be reliably masked, "
-                    f"so the run is refused rather than risk emitting them unmasked. "
+                    f"--mask-private: evidence URL {ev.url!r} has no parseable hostname; "
+                    f"cannot determine repo identity. Re-run without --mask-private."
+                )
+            # Host is valid; now verify the path yields a recognizable owner/repo.
+            segments = [s for s in parsed.path.split("/") if s]
+            if len(segments) < 2 or not _is_valid_owner_repo(f"{segments[0]}/{segments[1]}"):
+                raise MaskingError(
+                    f"--mask-private: evidence URL {ev.url!r} path does not contain a "
+                    f"recognizable owner/repo; cannot guarantee masking. "
                     f"Re-run without --mask-private."
                 )
+            # Well-formed URL (any host — github.com or GHES): accepted.
 
-        # IR-003: also check the structured ref for a host label.
-        # Evidence with an empty url but a ref of the form host/owner/repo#n
-        # (three or more slash-segments before # or :) carries a host prefix
-        # and must be refused, even if the host happens to be github.com.
-        # Rationale: the masking relabel layer (_parse_ref / _rewrite_ref) only
-        # handles bare two-segment owner/repo refs; a host-qualified ref cannot
-        # be discovered by extract_repo_names or relabeled by mask_portfolio, so
-        # silently passing the guard would cause the ref to leak unmasked.
-        # Failing closed for ANY non-None ref_host (including github.com) is
-        # therefore correct — bare owner/repo refs (ref_host=None) are the only
-        # shape the masking layer can actually relabel.
-        # IR-004 RESIDUAL: free-text GHES identifiers in ev.detail / ev.context /
-        # claim.text that have no structured ref/url are NOT covered here — they
-        # are handled by the IR-004 real-GHES-masking task.
+        # Check ev.ref for a malformed GHES-style host prefix.
+        # A two-segment bare ref (owner/repo#n) has ref_host=None and is always fine.
+        # A three-segment ref (host/owner/repo#n) must decompose via _parse_ghes_ref;
+        # if it does not (invalid characters, path-like extension), refuse it.
         ref_host = _ref_host(ev.ref)
-        if ref_host is not None:
+        if ref_host is not None and _parse_ghes_ref(ev.ref) is None:
             raise MaskingError(
-                f"--mask-private does not support host-qualified ref {ev.ref!r} "
-                f"(host {ref_host!r}): only bare owner/repo refs can be discovered "
-                f"and relabeled by the masking layer; a host-qualified ref cannot be "
-                f"masked, so the run is refused rather than risk emitting it unmasked. "
+                f"--mask-private: evidence ref {ev.ref!r} has host prefix {ref_host!r} "
+                f"but cannot be decomposed into a valid host/owner/repo. "
                 f"Re-run without --mask-private."
             )
 
 
 def _gh_visibility_lookup(repo: str) -> bool:
-    """Look up whether a GitHub repo is private using 'gh repo view'.
+    """Look up whether a repo is private using 'gh repo view'.
+
+    ``repo`` is either a bare 'owner/repo' string (for github.com) or a
+    'host/owner/repo' string (for GitHub Enterprise Server / any other host).
+    The gh CLI accepts both forms natively — host-prefixed for GHES repos.
 
     Raises on any of: non-zero exit code, invalid JSON stdout, missing
     'isPrivate' key, or non-bool 'isPrivate' value.
@@ -281,31 +349,58 @@ def private_repos(repos: set[str], *, visibility_lookup=_gh_visibility_lookup) -
 
 
 def _build_relabel_map(private: set[str]) -> dict[str, str]:
-    """Build a deterministic relabel map: sorted(private) -> private-repo-1, ..."""
-    return {repo: f"private-repo-{i + 1}" for i, repo in enumerate(sorted(private))}
+    """Build a deterministic relabel map: sorted(private) -> private-repo-1, ...
+
+    Keys may be bare 'owner/repo' (github.com) or 'host/owner/repo' (GHES).
+    Both are lowercase strings; sorted() gives lexicographic order across hosts.
+
+    For GHES keys ('host/owner/repo'), a bare 'owner/repo' alias is also added
+    so that free text containing only the bare owner/repo substring is also
+    scrubbed (in addition to the full host/owner/repo pattern).  The bare alias
+    is only added when the bare key is not already covered by a github.com key of
+    the same name (github.com key takes precedence in that case).
+    """
+    relabel = {repo: f"private-repo-{i + 1}" for i, repo in enumerate(sorted(private))}
+    extra: dict[str, str] = {}
+    for key, label in relabel.items():
+        parts = key.split("/")
+        if len(parts) == 3:  # host/owner/repo (GHES)
+            bare = f"{parts[1]}/{parts[2]}"
+            if bare not in relabel:
+                extra[bare] = label
+    relabel.update(extra)
+    return relabel
 
 
 def _rewrite_ref(ref: str, relabel: dict[str, str]) -> str:
-    """Rewrite an evidence ref or claim evidence_ref using the relabel map."""
+    """Rewrite an evidence ref or claim evidence_ref using the relabel map.
+
+    Handles both github.com refs (owner/repo#n, owner/repo:path) and GHES refs
+    (host/owner/repo#n, host/owner/repo:path).  Lookup is case-insensitive
+    because all keys in relabel are lowercase.
+    """
     if "#" in ref:
-        owner_repo = ref.split("#")[0]
-        if owner_repo in relabel:
-            return relabel[owner_repo] + "#" + ref[len(owner_repo) + 1 :]
+        prefix = ref.split("#")[0]
+        key = prefix.lower()
+        if key in relabel:
+            return relabel[key] + "#" + ref[len(prefix) + 1 :]
     elif ":" in ref:
-        owner_repo = ref.split(":", 1)[0]
-        if owner_repo in relabel:
-            return relabel[owner_repo] + ":" + ref[len(owner_repo) + 1 :]
+        prefix = ref.split(":", 1)[0]
+        key = prefix.lower()
+        if key in relabel:
+            return relabel[key] + ":" + ref[len(prefix) + 1 :]
     return ref
 
 
 def _rewrite_text(text: str, relabel: dict[str, str]) -> str:
-    """Replace all private owner/repo substrings in free text.
+    """Replace all private owner/repo substrings in free text (case-insensitive).
 
     Longest names first to avoid partial-name collision (e.g. org/repo-tools
     must not be mis-replaced when org/repo is a shorter private name).
+    Uses case-insensitive matching so mixed-case occurrences are also replaced.
     """
     for repo in sorted(relabel, key=len, reverse=True):
-        text = text.replace(repo, relabel[repo])
+        text = re.sub(re.escape(repo), relabel[repo], text, flags=re.IGNORECASE)
     return text
 
 
@@ -313,6 +408,8 @@ def mask_portfolio(portfolio: Portfolio, private: set[str]) -> Portfolio:
     """Return a new Portfolio with private repos relabeled.
 
     Input portfolio is NOT mutated. Labels are assigned in sorted() order.
+    Handles both github.com repos (bare 'owner/repo' keys) and GHES repos
+    ('host/owner/repo' keys) transparently.
     """
     # Verify no mutation by noting state — deepcopy for the return check
     _original = copy.deepcopy(portfolio)  # noqa: F841 — kept for mutation assertion
@@ -347,10 +444,13 @@ def mask_portfolio(portfolio: Portfolio, private: set[str]) -> Portfolio:
     new_evidence = []
     for ev in portfolio.evidence:
         new_ref = _rewrite_ref(ev.ref, relabel)
-        # URL: replace owner/repo substring — longest names first (collision-safe)
+        # URL: replace owner/repo or host/owner/repo substring — longest names
+        # first (collision-safe), case-insensitive (hosts and repo names are
+        # case-insensitive on GitHub and GitHub Enterprise Server).
         new_url = ev.url
-        for repo in sorted(relabel, key=len, reverse=True):
-            new_url = new_url.replace(repo, relabel[repo])
+        if new_url:
+            for repo in sorted(relabel, key=len, reverse=True):
+                new_url = re.sub(re.escape(repo), relabel[repo], new_url, flags=re.IGNORECASE)
         new_detail = _rewrite_text(ev.detail, relabel)
         new_context = _rewrite_text(ev.context, relabel)
         new_evidence.append(
