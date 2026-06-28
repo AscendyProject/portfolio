@@ -51,6 +51,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--jd`, so a directory of PDF JDs is scored consistently (#70).
 
 ### Security
+- **DR-004 rating output-gate guard:** enforced the no-percentile/population/ranking rule at the rating output gate by drop-filtering reasoning bullets containing banned percentile/ranking lexicons (closes #60).
 - **IR-001 — refuse before the first model call:** `resolve_and_optionally_mask`
   now runs the masking guard (`assert_maskable`) on extracted evidence **before**
   any call to the narrate runner or synthesis runner. Previously the guard ran

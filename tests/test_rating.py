@@ -788,17 +788,11 @@ def test_no_percentile_lexicon_in_rendered_output():
     grade_result = grade(portfolio, profile_result, _make_simple_grader())
     markdown = render_rating(portfolio, profile_result, grade_result)
 
+    # Independent policy oracle — intentionally NOT imported from production, so this
+    # test fails (rather than silently following) if production narrows the banned
+    # set (codex IR-002). Phrases use the surface forms a reader would write.
+    forbidden = ["top ", "%ile", "percentile", "rank", "better than", "out of all", "globally", "talent score"]
     lower = markdown.lower()
-    forbidden = [
-        "top ",
-        "%ile",
-        "percentile",
-        "rank",
-        "better than",
-        "out of all",
-        "globally",
-        "talent score",
-    ]
     for phrase in forbidden:
         assert phrase not in lower, f"forbidden phrase {phrase!r} found in rendered output"
 

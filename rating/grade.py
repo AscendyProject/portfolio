@@ -12,6 +12,7 @@ grade nor the score — removing the free, clustering score-pick.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -23,6 +24,43 @@ from rating.profile import ProfileResult
 # The default temperature argument ensures callers signal intent even if the
 # underlying service ignores the kwarg.
 GraderRunner = Callable[..., str]
+
+
+# Human-readable list of the percentile/population/ranking concepts the rating
+# output gate forbids (DR-004; issue #60). The actual matcher is
+# _BANNED_PERCENTILE_RE below — word-boundary-aware so it does NOT drop
+# legitimate bullets: raw substring matching would catch "desktop" via "top "
+# and "Frank" via "rank" and silently discard valid grounded reasoning.
+BANNED_PERCENTILE_LEXICON: list[str] = [
+    "top",
+    "%ile",
+    "percentile",
+    "rank",
+    "better than",
+    "out of all",
+    "globally",
+    "talent score",
+]
+
+# Word-boundary-anchored matcher. Single risk-prone words (top, rank, percentile,
+# globally) get a leading \b so "desktop"/"Frank"/"crank" are NOT matched, while
+# inflections (ranked, ranking, top-N) still are. Fragments/phrases (%ile,
+# "better than", …) match as-is. Case-insensitive.
+_BANNED_PERCENTILE_RE = re.compile(
+    "|".join(
+        [
+            r"\btop\b",
+            r"%ile",
+            r"\bpercentile",
+            r"\brank",
+            r"\bbetter than\b",
+            r"\bout of all\b",
+            r"\bglobally\b",
+            r"\btalent score\b",
+        ]
+    ),
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -111,6 +149,10 @@ def _parse_reasoning(raw: str, portfolio: Portfolio) -> list[dict]:
         # Drop it if its refs are empty OR any ref is not in the portfolio's
         # evidence set (an uncited bullet must never ship — IR-002).
         if refs and all(r in evidence_refs_set for r in refs):
+            # Output gate guard: drop any bullet making a banned percentile/ranking
+            # claim (DR-004). Word-boundary-aware so legitimate bullets survive.
+            if _BANNED_PERCENTILE_RE.search(text_val):
+                continue
             checked.append({"text": text_val.strip(), "evidence_refs": refs})
 
     return checked or list(_SAFE_REASONING)
