@@ -39,6 +39,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `context`, `claim.text`, and `claim.evidence_refs` are all replaced.
   Owner/repo identity is normalized to lowercase, so `Owner/Repo` and
   `owner/repo` map to a single key per host.
+- **#48 calibration spike, exit-(a) — criterion-referenced regression guards:** locked the
+  spike conclusion ("the bars discriminate sanely") as permanent regression tests in
+  `tests/test_rating_calibration.py` (monotonicity, trivial floor, top-reachable,
+  no-collapse, and docs-framing checks). Added criterion-referenced / "not a percentile"
+  framing to `rating/profile.py`, README, and CHANGELOG. No scoring behavior change.
 - **PDF job-description files for `--jd`** (`resume` / `fit`) — a local `--jd` is now
   detected by its `%PDF-` signature (not the extension) and its text extracted, so a
   PDF JD works without converting first. Extraction uses `pypdf`, gated behind an

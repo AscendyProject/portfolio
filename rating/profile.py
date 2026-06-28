@@ -108,6 +108,13 @@ def language_for_ref(ref: str) -> str:
     return EXT_TO_LANG.get(ext, "other")
 
 
+# --- Criterion-referenced framing (DR-001 / DR-005; issue #48 exit-(a)) ------------------
+# The grade bands, per-dimension bands, capability curves, S guard, and substance cap below
+# are criterion-referenced, not a percentile or population rank. Each threshold is a
+# product-defined evidence threshold — "this much grounded work demonstrates this level of
+# capability." The rubric does not shift with whatever set of developers passes through it
+# and carries no hiring-readiness, market-rank, or population-comparison meaning.
+
 # Grade → score band (fixed rubric, shown in the rendered scorecard).
 GRADE_BANDS: dict[str, tuple[int, int]] = {
     "S": (96, 100),
