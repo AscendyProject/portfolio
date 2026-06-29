@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +23,9 @@ import portfolio.i18n as i18n
 from portfolio.extract import extract_merged_prs
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
+from portfolio.mask import _rewrite_text
 from portfolio.pipeline import resolve_and_optionally_mask
+from portfolio.share import GistSharer, Sharer, share_links
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
 from rating.grade import grade
@@ -65,6 +68,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--show-refs", action="store_true", default=False, help="include grounding refs in rendered output"
     )
     parser.add_argument("--lang", choices=tuple(i18n.LANGS), default=None, help="output language code (default: en)")
+    parser.add_argument(
+        "--share", action="store_true", default=False, help="publish rating to a GitHub Gist and print share links"
+    )
+    parser.add_argument(
+        "--share-public", action="store_true", default=False, help="make the Gist public (default: secret)"
+    )
+    parser.add_argument(
+        "--no-mask-on-share", action="store_true", default=False, help="disable auto-masking when --share is set"
+    )
     return parser
 
 
@@ -76,15 +88,23 @@ def run(
     fetcher=fetch_html,
     grader_runner=_default_grader_runner,
     visibility_lookup=None,
+    sharer: Sharer | None = None,
 ) -> int:
     """Execute the CLI. Returns a process exit code (0 = success).
 
     `extractor` (gh), `fetcher` (web), `runner` (narration model), and
     `grader_runner` (agent grader) are injectable seams: the defaults hit live
     services, but tests pass fakes so no live service is required.
+
+    `sharer` is an injectable Sharer instance used when --share is set.
+    Defaults to GistSharer() when None and --share is active.
     """
     args = _build_parser().parse_args(argv)
     lang = args.lang or "en"
+
+    # Privacy-first mask resolution: --share enables masking by default unless
+    # --no-mask-on-share is explicitly given. --mask-private always wins.
+    effective_mask = args.mask_private or (args.share and not args.no_mask_on_share)
 
     # Resolve the source (validation/parse only — no extraction yet).
     try:
@@ -105,7 +125,7 @@ def run(
             resolved,
             subject=resolved.subject,
             runner=runner,
-            mask_private=args.mask_private,
+            mask_private=effective_mask,
             synthesis_runner=None,
             visibility_lookup=visibility_lookup,
             lang=lang,
@@ -114,8 +134,12 @@ def run(
         print(f"failed to build portfolio: {exc}", file=sys.stderr)
         return 1
 
-    if args.mask_private:
-        print(f"masked {n_masked} private repo(s)", file=sys.stderr)
+    # On the --share path every pre-publish stderr line is deferred until publish
+    # succeeds (so a failure emits exactly one clean error line — IR-003). Off the
+    # share path this prints here, preserving existing ordering byte-for-byte.
+    mask_summary = f"masked {n_masked} private repo(s)" if effective_mask else None
+    if mask_summary and not args.share:
+        print(mask_summary, file=sys.stderr)
 
     # Deterministic profiling (pure, no model call).
     profile_result = profile(result.portfolio)
@@ -128,7 +152,7 @@ def run(
         return 1
 
     # Post-model scrub: replace any private owner/repo the grader emitted
-    if args.mask_private and result.relabel:
+    if effective_mask and result.relabel:
         from rating.grade import GradeResult as _GradeResult
 
         def _scrub(s: str) -> str:
@@ -151,14 +175,61 @@ def run(
 
     markdown = render_rating(result.portfolio, profile_result, grade_result, show_refs=args.show_refs, lang=lang)
 
-    # Grounding summary on stderr only (never in the rendered body).
+    # Grounding summary on stderr only (never in the rendered body). Built here but
+    # printed per-path below: on the --share path it is deferred until AFTER a
+    # successful publish, so a publish failure emits exactly ONE clean stderr line.
     grounding = result.grounding
-    print(
+    grounding_summary = (
         f"grounded: {len(grounding.grounded)}  "
         f"rejected: {len(grounding.rejected)}  "
-        f"needs-confirmation: {len(grounding.needs_confirmation)}",
-        file=sys.stderr,
+        f"needs-confirmation: {len(grounding.needs_confirmation)}"
     )
+
+    if args.share:
+        # Append provenance footer — share path only; non-share render stays byte-identical.
+        footer = i18n.LANGS[lang]["share_provenance_footer"]
+        shared_markdown = markdown + "\n\n" + footer + "\n"
+
+        # The shared artifact and its gist filename are channels that bypass the
+        # evidence/claim masking applied during the pipeline — e.g. `render_rating`
+        # renders the subject verbatim into the heading. Scrub the FULL shared Markdown
+        # AND the title with the same relabel map so no raw private repo name (from the
+        # subject or anywhere else) can reach the gist body or filename.
+        def _scrub_shared(s: str) -> str:
+            # Reuse the canonical masking scrubber (case-insensitive, longest-first)
+            # so the share channels mask exactly like the rest of the pipeline.
+            return _rewrite_text(s, result.relabel) if (effective_mask and result.relabel) else s
+
+        shared_markdown = _scrub_shared(shared_markdown)
+
+        # Publish via the injected (or default) Sharer. On failure, the only stderr
+        # output is the single clean error line below (the grounding summary is not
+        # emitted yet), satisfying the single-line failure contract.
+        active_sharer = sharer if sharer is not None else GistSharer()
+        # Title → gist filename: scrub with the relabel map, then restrict to
+        # filename-safe characters (no path separators / odd bytes reach `gh`).
+        title = re.sub(r"[^A-Za-z0-9._-]+", "-", _scrub_shared(f"rating-{result.portfolio.subject}")).strip("-") or (
+            "rating"
+        )
+        try:
+            share_result = active_sharer.publish(shared_markdown, title=title, public=args.share_public)
+        except Exception:
+            print("share failed: could not publish to Gist", file=sys.stderr)
+            return 1
+
+        # Success: deferred stderr lines (mask summary, grounding summary), then the
+        # footer-bearing report → gist URL → social links on stdout.
+        if mask_summary:
+            print(mask_summary, file=sys.stderr)
+        print(grounding_summary, file=sys.stderr)
+        emit_markdown(shared_markdown)
+        links = share_links(share_result.url, f"My grounded capability rating: {share_result.url}")
+        print(share_result.url)
+        print(links["linkedin"])
+        print(links["x"])
+        return 0
+
+    print(grounding_summary, file=sys.stderr)
 
     if args.out:
         try:
