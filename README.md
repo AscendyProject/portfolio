@@ -227,6 +227,36 @@ door; `--out <file>` writes to a file instead of stdout.
 > not on any developer population. The score does not shift with whoever is run through the
 > tool and carries no percentile, rank, or hiring-readiness claim.
 
+#### `--share` — publish rating to a GitHub Gist
+
+Pass `--share` to publish the rendered rating to a GitHub Gist and print pre-filled
+LinkedIn and X (Twitter) share links:
+
+```bash
+python -m rating --source-type github --source <url> --author <handle> --share
+```
+
+**Privacy-first by default:** when `--share` is set, private repo names are masked
+automatically (equivalent to `--mask-private`). To opt out and allow the raw repo name in
+the published artifact, pass `--no-mask-on-share`. If you also pass `--mask-private`,
+masking is always on — `--mask-private` wins over `--no-mask-on-share`.
+
+```bash
+# Secret Gist (default), private repos masked:
+python -m rating --source-type github-author --author <handle> --share
+
+# Secret Gist, allow private repo names in published artifact:
+python -m rating --source-type github-author --author <handle> --share --no-mask-on-share
+
+# Public Gist:
+python -m rating --source-type github-author --author <handle> --share --share-public
+```
+
+The Gist is created via `gh gist create` (requires an authenticated `gh` session). On
+success, stdout shows the rendered report followed by the Gist URL, a LinkedIn share
+link, and an X share link. On failure, the CLI exits non-zero with a clean error on
+stderr; no partial Gist URL or social links are printed.
+
 ## Source types
 
 All five commands accept `--source-type` to select the evidence source:

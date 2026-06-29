@@ -7,6 +7,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`rating --share` — publish to GitHub Gist + social share links** — pass
+  `--share` to publish the rendered rating to a secret GitHub Gist (via `gh gist
+  create`) and print pre-filled LinkedIn and X (Twitter) intent URLs. `--share-public`
+  makes the Gist public. Privacy-first by default: `--share` auto-enables masking of
+  private repo names; pass `--no-mask-on-share` to opt out (explicit `--mask-private`
+  always wins). The provenance footer (`LANGS[lang]["share_provenance_footer"]`) is
+  appended to the published Markdown only; the non-share render path is byte-identical
+  to the pre-change behavior.
 - **GHES private repos are now MASKED end-to-end for `--mask-private`, not
   refused (IR-004)** — previously `assert_maskable` failed closed on any
   non-github.com host, so a developer split across github.com and a GitHub
