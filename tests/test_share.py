@@ -202,8 +202,15 @@ class _FakeSharer(Sharer):
         self.url = url
         self.calls: list[dict] = []
 
-    def publish(self, markdown: str, *, title: str, public: bool) -> ShareResult:
-        self.calls.append({"markdown": markdown, "title": title, "public": public})
+    def publish(
+        self,
+        markdown: str,
+        *,
+        title: str,
+        public: bool,
+        extra_files: dict | None = None,
+    ) -> ShareResult:
+        self.calls.append({"markdown": markdown, "title": title, "public": public, "extra_files": extra_files})
         return ShareResult(url=self.url)
 
 
@@ -554,7 +561,7 @@ def test_publish_failure_exits_nonzero(capsys):
     """When Sharer.publish raises, CLI exits non-zero."""
 
     class FailSharer(Sharer):
-        def publish(self, markdown, *, title, public):
+        def publish(self, markdown, *, title, public, extra_files=None):
             raise RuntimeError("simulated publish failure")
 
     code = run(
@@ -573,7 +580,7 @@ def test_publish_failure_clean_stderr_no_traceback(capsys):
     token_msg = "ghp_FAKETOKEN1234567890abcdefghijklmnop"
 
     class FailSharer(Sharer):
-        def publish(self, markdown, *, title, public):
+        def publish(self, markdown, *, title, public, extra_files=None):
             raise RuntimeError(f"auth failed: {token_msg}")
 
     code = run(
@@ -600,7 +607,7 @@ def test_publish_failure_no_gist_url_on_stdout(capsys):
     """On publish failure, stdout must not contain a gist URL or social links."""
 
     class FailSharer(Sharer):
-        def publish(self, markdown, *, title, public):
+        def publish(self, markdown, *, title, public, extra_files=None):
             raise RuntimeError("network error")
 
     code = run(
@@ -631,3 +638,118 @@ def test_help_mentions_share_flags(capsys):
     assert "--share" in out
     assert "--share-public" in out
     assert "--no-mask-on-share" in out
+
+
+# ---------------------------------------------------------------------------
+# extra_files round-trip and GistSharer multi-file argv
+# ---------------------------------------------------------------------------
+
+
+def test_fake_sharer_captures_extra_files():
+    """_FakeSharer.publish captures extra_files; existing assertions still pass when None."""
+    sharer = _FakeSharer()
+    # Call with extra_files=None (backward-compat default)
+    sharer.publish("md content", title="t", public=False, extra_files=None)
+    assert sharer.calls[0]["extra_files"] is None
+    assert sharer.calls[0]["markdown"] == "md content"
+
+    # Call with extra_files dict
+    sharer.publish("md2", title="t2", public=True, extra_files={"f.svg": "<svg/>"})
+    assert sharer.calls[1]["extra_files"] == {"f.svg": "<svg/>"}
+
+
+def test_share_cli_passes_extra_files_svg(capsys):
+    """Under --share, the CLI passes extra_files containing the .svg entry."""
+    fake_sharer = _FakeSharer()
+    code = run(
+        _rating_argv(share=True),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+        sharer=fake_sharer,
+    )
+    capsys.readouterr()
+    assert code == 0
+    assert len(fake_sharer.calls) == 1
+    extra_files = fake_sharer.calls[0]["extra_files"]
+    assert extra_files is not None
+    # Exactly one .svg entry, no .md entry
+    svg_keys = [k for k in extra_files if k.endswith(".svg")]
+    md_keys = [k for k in extra_files if k.endswith(".md")]
+    assert len(svg_keys) == 1
+    assert len(md_keys) == 0
+    # The SVG body is a non-empty string
+    assert extra_files[svg_keys[0]].strip()
+
+
+def test_gist_sharer_extra_files_argv_shape():
+    """GistSharer with extra_files writes to a single tmpdir; argv carries both paths."""
+    import os
+
+    calls: list = []
+    sharer = GistSharer(gh_runner=_make_fake_gh(calls))
+    result = sharer.publish(
+        "# Hello",
+        title="my-rating",
+        public=False,
+        extra_files={"my-rating.svg": "<svg/>"},
+    )
+    assert result.url == "https://gist.github.com/fake/abc123"
+    assert len(calls) == 1
+    argv = calls[0]["argv"]
+    # argv is a list (no shell=True)
+    assert isinstance(argv, list)
+    assert argv[0] == "gh"
+    assert "gist" in argv
+    assert "create" in argv
+    # --public must NOT be present (public=False)
+    assert "--public" not in argv
+    # stdin is None (file-based, not stdin)
+    assert calls[0]["stdin_bytes"] is None
+    # Exactly one .md path and one .svg path in the argv
+    md_paths = [a for a in argv if a.endswith(".md")]
+    svg_paths = [a for a in argv if a.endswith(".svg")]
+    assert len(md_paths) == 1
+    assert len(svg_paths) == 1
+    # Both paths share the same parent (same TemporaryDirectory)
+    assert os.path.dirname(md_paths[0]) == os.path.dirname(svg_paths[0])
+
+
+def test_gist_sharer_extra_files_public_flag():
+    """GistSharer with extra_files and public=True includes --public in argv."""
+    calls: list = []
+    sharer = GistSharer(gh_runner=_make_fake_gh(calls))
+    sharer.publish("md", title="t", public=True, extra_files={"t.svg": "<svg/>"})
+    assert "--public" in calls[0]["argv"]
+
+
+def test_gist_sharer_none_extra_files_uses_stdin():
+    """GistSharer with extra_files=None uses stdin (byte-identical to today)."""
+    calls: list = []
+    sharer = GistSharer(gh_runner=_make_fake_gh(calls))
+    sharer.publish("md content", title="t", public=False, extra_files=None)
+    argv = calls[0]["argv"]
+    # Single-file stdin path: --filename flag present and "-" arg present
+    assert "--filename" in argv
+    assert "-" in argv
+    assert calls[0]["stdin_bytes"] == b"md content"
+
+
+def test_publish_failure_no_badge_snippet_on_stdout(capsys):
+    """On publish failure, stdout must not contain the badge snippet."""
+
+    class FailSharer(Sharer):
+        def publish(self, markdown, *, title, public, extra_files=None):
+            raise RuntimeError("network error")
+
+    code = run(
+        _rating_argv(share=True),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+        sharer=FailSharer(),
+    )
+    out = capsys.readouterr().out
+    assert code != 0
+    assert "![" not in out
+    assert "gist.githubusercontent.com" not in out

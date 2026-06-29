@@ -7,6 +7,35 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **SVG capability card renderer (`portfolio/card.py`) + `rating --out-card`** — a
+  deterministic, stdlib-only SVG card renderer (`render_card(profile_result,
+  grade_result, *, subject, lang, verify_url)`) with no new runtime dependency. The
+  card shows the grade letter, numeric score, up to three grounded strength bullets
+  (from `grade_result.reasoning`), an i18n tagline
+  (`LANGS[lang]["card_tagline"]` — en + ko), and an optional verify URL. Every
+  interpolated value is XML-escaped via `xml.sax.saxutils.escape`/`quoteattr`; the
+  card is byte-deterministic (same inputs → identical bytes) and self-contained (no
+  external fonts, images, or scripts). Pass `--out-card <file>` to write the card to a
+  local file (independent of `--share`); an OSError on write exits non-zero with a
+  single clean stderr line.
+- **Multi-file gist publish (`portfolio/share.py`)** — `Sharer.publish` and
+  `GistSharer.publish` now accept a keyword-only `extra_files: dict[str, str] | None =
+  None`. When `None` (default), behavior is byte-identical to the previous release.
+  When non-None, all files (primary Markdown + each `extra_files` entry) are written
+  into a `tempfile.TemporaryDirectory()` (auto-cleaned) and passed as argv file paths
+  to `gh gist create` (no `shell=True`, no stdin, no named temp files). Added
+  `gist_raw_url(gist_url, filename) -> str` — a pure string transform that derives
+  `https://gist.githubusercontent.com/<user>/<id>/raw/<filename>` from
+  `https://gist.github.com/<user>/<id>`.
+- **`rating --share` publishes the SVG card as a second gist file and prints a README
+  badge snippet** — under `--share`, the CLI renders the SVG card, passes it to
+  `Sharer.publish` as `extra_files={f"{title}.svg": card_svg}` (alongside the primary
+  Markdown), and — after a successful publish — prints a ready-to-paste README badge
+  line (`![Capability rating](<raw_url>)`) after the existing gist URL + social links.
+  Masking applies: the card body, subject, and `.svg` filename are all scrubbed with
+  `_rewrite_text` against the same relabel map as the shared Markdown. The
+  single-clean-stderr-line-on-failure contract (IR-003) is preserved; the badge snippet
+  is NOT printed on the failure path.
 - **`rating --share` — publish to GitHub Gist + social share links** — pass
   `--share` to publish the rendered rating to a secret GitHub Gist (via `gh gist
   create`) and print pre-filled LinkedIn and X (Twitter) intent URLs. `--share-public`

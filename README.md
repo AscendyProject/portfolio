@@ -254,8 +254,41 @@ python -m rating --source-type github-author --author <handle> --share --share-p
 
 The Gist is created via `gh gist create` (requires an authenticated `gh` session). On
 success, stdout shows the rendered report followed by the Gist URL, a LinkedIn share
-link, and an X share link. On failure, the CLI exits non-zero with a clean error on
-stderr; no partial Gist URL or social links are printed.
+link, an X share link, and a **README badge snippet** you can paste directly into a
+profile README:
+
+```markdown
+![Capability rating](https://gist.githubusercontent.com/<user>/<id>/raw/rating-<handle>.svg)
+```
+
+On failure, the CLI exits non-zero with a clean error on stderr; no partial Gist URL,
+social links, or badge snippet are printed.
+
+#### `--out-card` — write an SVG capability card locally
+
+Pass `--out-card <file>` to write a self-contained SVG capability card to a local file
+(works with or without `--share`):
+
+```bash
+python -m rating --source-type github --source <url> --author <handle> --out-card card.svg
+```
+
+The card is dependency-free (stdlib SVG — no external fonts, no scripts, no images) and
+deterministic: the same rating inputs always produce byte-identical output. It shows the
+grade letter, numeric score, up to three grounded strength bullets, and a
+"grounded in real GitHub evidence" tagline. Masking applies: when `--mask-private` or
+`--share` is set, private repo names are scrubbed from the card body and from the `.svg`
+filename in the gist before publish.
+
+**Embed in a GitHub profile README** (after `--share` prints the badge snippet):
+
+```markdown
+![Capability rating](https://gist.githubusercontent.com/<user>/<id>/raw/rating-<handle>.svg)
+```
+
+> **PNG rasterization is planned** as an optional `card` extra (`pip install 'portfolio[card]'`,
+> imported lazily). Not available in v1 — SVG renders natively on GitHub READMEs via the raw
+> gist URL.
 
 ## Source types
 
