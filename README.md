@@ -312,6 +312,7 @@ All five commands accept `--source-type` to select the evidence source:
 | `portfolio` | path to a saved `.json` file (required) | _(ignored; subject from file)_ | re-uses a previously saved grounded portfolio |
 | `gitlab` | GitLab project URL (required) | username (required) | merged MRs in one GitLab project |
 | `gitlab-author` | _(not used)_ | username (required) | merged MRs across **all** projects the `glab` token can see |
+| `bitbucket` | Bitbucket Cloud repo URL (required) | username (required) | merged PRs in one Bitbucket Cloud repo |
 
 ### GitLab source types (`gitlab` / `gitlab-author`)
 
@@ -359,7 +360,35 @@ python -m portfolio --source-type gitlab \
   masked under `--mask-private` regardless of their actual visibility. Pass
   `--no-mask-on-share` or omit `--mask-private` if you want the project name
   visible in the output. A `glab`-based precise visibility lookup is a follow-up.
-- **Bitbucket and other SCMs** are not yet supported (follow-up tasks).
+- **Other SCMs** are not yet supported (follow-up tasks).
+
+### Bitbucket source type (`bitbucket`)
+
+**Prerequisite:** Bitbucket Cloud credentials set in environment variables (no extra CLI binary needed — uses stdlib `urllib`).
+
+```bash
+# Project-scoped: merged PRs by <author> in one Bitbucket Cloud repo
+python -m portfolio --source-type bitbucket \
+  --source https://bitbucket.org/<workspace>/<repo> --author <username>
+```
+
+**Auth env vars (set one of):**
+
+- `BITBUCKET_TOKEN=<api-token>` — Atlassian API token (recommended, Bearer auth)
+- `BITBUCKET_USERNAME=<user>` + `BITBUCKET_APP_PASSWORD=<app-password>` — Bitbucket app password with PR-read scope (Basic auth, legacy)
+
+When `BITBUCKET_TOKEN` is set it takes precedence. When neither is set the command exits with a clean `RuntimeError` naming the env vars to set — no traceback or credential bytes in the message.
+
+**v1 limitations and behaviour notes:**
+
+- **Bitbucket Cloud only.** Bitbucket Server / Data Center (different API surface) is not supported in v1.
+- **Repo-scoped only.** A `bitbucket-author` (cross-repo, all merged PRs) source type is not in v1 — Bitbucket has no simple cross-repo endpoint.
+- **Real change-size + per-file evidence (best-effort).** After the PR list call, each merged PR triggers one additional diffstat API call. The extractor counts code-only added/deleted lines (same lockfile / vendored-dir / non-code-extension denylist as the GitHub path) and emits one `kind="file"` Evidence per changed code file. If the diffstat call fails (auth error, transport error, API error), that PR silently falls back to `additions=0 / deletions=0` with no file evidence — the overall extraction never crashes.
+- **Diffstat pagination is bounded.** Each PR's diffstat is paged up to 20 pages. Very large PRs may silently truncate the changed-file list.
+- **Binary files have no line stats.** Binary diffs contribute 0 to the change-size count.
+- **SSRF guard.** Pagination `next` URLs are only followed when the host is exactly `api.bitbucket.org`; any other host is silently refused.
+- **Fail-safe masking.** `--mask-private` on a Bitbucket source relies on the existing fail-safe: the `gh repo view` visibility lookup fails for Bitbucket repos (wrong tool) → the repo is treated as private → masked. All Bitbucket repos are masked under `--mask-private` regardless of their actual visibility. Pass `--no-mask-on-share` or omit `--mask-private` if you want the repo name visible in output.
+- **API field-name caveat.** Field names (`values`, `next`, `links.html.href`, `lines_added`, `lines_removed`, `old.path`, `new.path`) were inferred from the Bitbucket Cloud REST API 2.0 documentation. Verify them against a real Bitbucket Cloud account before relying on live output.
 
 ### Save-then-reuse two-step
 

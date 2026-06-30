@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from portfolio.extract import extract_authored_prs, extract_merged_prs
+from portfolio.extract_bitbucket import extract_merged_prs_bitbucket, validate_bitbucket_author
 from portfolio.extract_gitlab import extract_authored_mrs, extract_merged_mrs
 from portfolio.model import Evidence, Portfolio
 from portfolio.web import extract_article_evidence, fetch_html, parse_web_source
@@ -80,6 +81,10 @@ class SourceRequest:
     # fakes here so the full suite runs without a real `glab` binary.
     gitlab_extractor: Callable[..., list[Evidence]] = extract_merged_mrs
     gitlab_author_extractor: Callable[..., list[Evidence]] = extract_authored_mrs
+    # Injectable extractor for the bitbucket source type (the REST API seam).
+    # Defaults to the module-level function; tests substitute a fake here so
+    # the suite runs without live Bitbucket credentials.
+    bitbucket_extractor: Callable[..., list[Evidence]] = extract_merged_prs_bitbucket
 
 
 @dataclass(frozen=True)
@@ -244,6 +249,96 @@ def parse_gitlab_source(url: str) -> str:
     return f"{host}/{project_path}"
 
 
+def parse_bitbucket_source(url: str) -> str:
+    """Parse a Bitbucket Cloud repo URL into a host-qualified key.
+
+    Accepts ``http(s)://bitbucket.org/<workspace>/<repo>`` with an optional
+    trailing slash or ``.git`` suffix. Always returns a host-qualified key of
+    the form ``bitbucket.org/<workspace>/<repo>`` (Cloud is always
+    ``bitbucket.org``; there is no self-hosted variant in v1).
+
+    Applies the same SSRF hardening as ``parse_github_source`` and
+    ``parse_gitlab_source``: rejects IP-literal hosts (canonical ``ipaddress``
+    + legacy ``inet_aton`` forms), userinfo (``user@host``), explicit ports,
+    non-http(s) schemes, query strings, fragments, single-label hosts, and
+    empty/``./..`` path segments. Raises ``ValueError`` on any violation.
+
+    Exactly two path segments (workspace + repo) are required — unlike GitLab
+    which accepts nested namespaces.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"expected an http(s) URL, got {url!r}")
+    # Reject userinfo (authority spoofing)
+    if parsed.username is not None:
+        raise ValueError(f"userinfo in URL authority is not allowed: {url!r}")
+    # Reject explicit port (inspect raw netloc — same technique as parse_github_source)
+    netloc = parsed.netloc
+    if netloc.startswith("["):
+        close = netloc.find("]")
+        if close >= 0:
+            netloc = netloc[close + 1 :]
+    if ":" in netloc:
+        raise ValueError(f"explicit port is not allowed in {url!r}")
+    host = parsed.hostname
+    if not host:
+        raise ValueError(f"invalid or missing host in {url!r}")
+    # Reject canonical IP-literal hosts
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        raise ValueError(f"IP-literal hosts are not allowed in {url!r}")
+    # Reject legacy / mixed-base IPv4 forms (mirrors parse_github_source)
+    try:
+        socket.inet_aton(host)
+    except OSError:
+        pass
+    else:
+        raise ValueError(f"IP-literal hosts are not allowed in {url!r}")
+    if not _HOST_RE.match(host):
+        raise ValueError(f"invalid or missing host in {url!r}")
+    # Bitbucket Cloud only — reject any non-bitbucket.org hostname that passes the
+    # generic SSRF checks above (e.g. https://evil.example/ws/repo would otherwise
+    # be accepted and confusingly resolve to evil.example/ws/repo as a key).
+    if host not in ("bitbucket.org", "www.bitbucket.org"):
+        raise ValueError(f"expected a bitbucket.org URL, got {url!r}")
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"unexpected query/fragment in {url!r}")
+    # Require exactly two non-empty path segments (workspace + repo).
+    path = parsed.path[:-1] if parsed.path.endswith("/") else parsed.path
+    segments = path.split("/")
+    if len(segments) != 3 or segments[0] != "":
+        raise ValueError(f"expected exactly <workspace>/<repo>, got {url!r}")
+    workspace, repo = segments[1], segments[2]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    if not _NAME_RE.match(workspace) or not _NAME_RE.match(repo):
+        raise ValueError(f"invalid workspace/repo name in {url!r}")
+    if workspace in (".", "..") or repo in (".", ".."):
+        raise ValueError(f"invalid workspace/repo name in {url!r}")
+    return f"{host}/{workspace}/{repo}"
+
+
+def _bitbucket_handler(request: SourceRequest) -> ResolvedSource:
+    """Resolve a project-scoped Bitbucket source: validate URL + author now, defer extraction."""
+    if not request.source:
+        raise ValueError("--source is required for --source-type bitbucket")
+    if not request.author:
+        raise ValueError("--author is required for --source-type bitbucket")
+    validate_bitbucket_author(request.author)  # reject query-injection authors early
+    key = parse_bitbucket_source(request.source)
+    parts = key.split("/")
+    workspace, repo = parts[1], parts[2]
+    author = request.author
+    extractor = request.bitbucket_extractor
+    limit = request.limit
+    return ResolvedSource(
+        subject=author, extract=lambda: extractor(workspace=workspace, repo=repo, author=author, limit=limit)
+    )
+
+
 def _validate_gitlab_author(author: str | None) -> str:
     """Validate a GitLab username: non-empty, matches ``[A-Za-z0-9._-]+``.
 
@@ -364,6 +459,7 @@ _HANDLERS: dict[str, SourceHandler] = {
     "portfolio": _portfolio_handler,
     "gitlab": _gitlab_handler,
     "gitlab-author": _gitlab_author_handler,
+    "bitbucket": _bitbucket_handler,
 }
 
 # Recognized source types that are intentionally NOT implemented yet — reserved

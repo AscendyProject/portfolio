@@ -7,6 +7,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`--source-type bitbucket`** — Add Bitbucket Cloud REST API 2.0 evidence extraction (repo-scoped, stdlib `urllib`-based). Supports Bearer (`BITBUCKET_TOKEN`) and Basic (`BITBUCKET_USERNAME` + `BITBUCKET_APP_PASSWORD`) auth; best-effort per-PR diffstat with code-only line counts and per-file evidence; SSRF-guarded pagination; injectable fetcher seam for tests with no live network or credentials.
 - **GitLab MR change-size + per-file evidence (best-effort)** — each merged MR
   now triggers one additional `glab api projects/<id>/merge_requests/<iid>/changes`
   call (N+1, bounded by `--limit`). When `glab` is authenticated the extractor
