@@ -7,6 +7,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **GitLab support: `--source-type gitlab` and `--source-type gitlab-author`** —
+  both source types pull merged Merge Requests as grounded `Evidence` via the
+  [`glab` CLI](https://gitlab.com/gitlab-org/cli) (the official GitLab CLI,
+  analogous to `gh` for GitHub). `gitlab` is project-scoped (requires `--source`
+  with a GitLab project URL and `--author`); `gitlab-author` is token-scoped
+  (requires only `--author`, covering all projects the `glab` token can see).
+  Nested namespaces (`group/subgroup/project`) are fully supported. Self-managed
+  GitLab instances are supported via host-qualified URLs. `glab` is treated as an
+  optional external CLI — not a pip dependency — and a missing or unauthenticated
+  `glab` produces a clean, actionable error. The masking layer (`--mask-private`)
+  uses the existing fail-safe for GitLab (visibility lookup via `gh repo view`
+  fails → treated as private → masked); a `glab`-based precise lookup is a
+  follow-up. v1 emits MR-level evidence only (no per-file diffs). Bitbucket and
+  other SCMs are explicit follow-ups.
 - **Optional `card` extra + `--out-card` PNG output** — `pip install 'portfolio[card]'`
   adds `cairosvg` as an optional dependency. Passing a `.png` path to `--out-card` now
   rasterizes the SVG card to PNG bytes via a lazy `cairosvg` import (mirroring the
