@@ -7,6 +7,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Optional `card` extra + `--out-card` PNG output** — `pip install 'portfolio[card]'`
+  adds `cairosvg` as an optional dependency. Passing a `.png` path to `--out-card` now
+  rasterizes the SVG card to PNG bytes via a lazy `cairosvg` import (mirroring the
+  `pdf`/`pypdf` pattern). When `cairosvg` is absent, `svg_to_png` raises
+  `CardExtraMissingError` and the CLI exits non-zero with a single clean install-hint
+  line on stderr; no partial file is written. The `--share` path and `.svg` output are
+  unchanged. The rasterizer is injectable (keyword-only `rasterizer=svg_to_png` on
+  `rating.cli.run`) so the full test suite runs without `cairosvg` installed.
 - **SVG capability card renderer (`portfolio/card.py`) + `rating --out-card`** — a
   deterministic, stdlib-only SVG card renderer (`render_card(profile_result,
   grade_result, *, subject, lang, verify_url)`) with no new runtime dependency. The

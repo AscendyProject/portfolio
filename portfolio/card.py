@@ -3,6 +3,10 @@
 render_card(profile_result, grade_result, *, subject, lang="en", verify_url=None) -> str
   Returns a self-contained SVG string. XML-escaped, byte-deterministic,
   fixed dimensions, grade-band accent color. No external fonts/images/scripts.
+
+svg_to_png(svg: str) -> bytes
+  Rasterizes an SVG string to PNG bytes via cairosvg (optional `card` extra).
+  Raises CardExtraMissingError if cairosvg is not installed.
 """
 
 from __future__ import annotations
@@ -10,6 +14,27 @@ from __future__ import annotations
 from xml.sax.saxutils import escape, quoteattr
 
 from portfolio.i18n import LANGS
+
+
+class CardExtraMissingError(Exception):
+    """Raised when the optional `card` extra (cairosvg) is not installed."""
+
+
+def svg_to_png(svg: str) -> bytes:
+    """Rasterize an SVG string to PNG bytes.
+
+    Lazily imports ``cairosvg``; raises ``CardExtraMissingError`` if the optional
+    ``card`` extra is not installed (mirrors the ``pypdf``/``portfolio[pdf]`` hint
+    in ``portfolio/jd_source.py``).
+    """
+    try:
+        import cairosvg
+    except ImportError as exc:
+        raise CardExtraMissingError(
+            "PNG export needs the optional 'card' dependency: pip install 'portfolio[card]'"
+        ) from exc
+    return cairosvg.svg2png(bytestring=svg.encode())
+
 
 # Pinned accent-color map: grade letter → hex color.
 # Same grade → same color across every call (determinism).

@@ -17,6 +17,8 @@ dev = ["ruff", "pytest", "pypdf"]
 # Optional: enables PDF job-description files for `resume`/`fit` --jd. The core
 # install carries no runtime deps; install this extra only if you pass PDFs.
 pdf = ["pypdf"]
+# Optional: enables PNG rasterization of the SVG capability card (`rating --out-card *.png`).
+card = ["cairosvg"]
 
 # The repo ships several sibling packages as one distribution; list them
 # explicitly so setuptools flat-layout auto-discovery doesn't bail out.

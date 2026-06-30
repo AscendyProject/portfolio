@@ -25,6 +25,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from portfolio.card import render_card  # noqa: E402
@@ -648,3 +650,271 @@ def test_gist_sharer_extra_files_no_shell_true():
     sharer.publish("md", title="t", public=False, extra_files={"t.svg": "<svg/>"})
     # If shell=True were used, argv would be a string; assert it is a list.
     assert isinstance(calls[0]["argv"], list)
+
+
+# ---------------------------------------------------------------------------
+# M. --out-card .png routing: invokes rasterizer; .svg unchanged (task-031)
+# ---------------------------------------------------------------------------
+
+
+def _fake_rasterizer(svg: str) -> bytes:
+    """Deterministic fake rasterizer: returns known bytes embedding the SVG."""
+    return b"FAKEPNG:" + svg.encode()
+
+
+def test_out_card_png_calls_rasterizer_and_writes_bytes(tmp_path):
+    """--out-card foo.png invokes the injected rasterizer with the rendered SVG string
+    and writes the returned bytes verbatim (binary write, not text)."""
+    card_path = tmp_path / "card.png"
+    calls: list[str] = []
+
+    def _tracking_rasterizer(svg: str) -> bytes:
+        calls.append(svg)
+        return b"FAKEPNG:" + svg.encode()
+
+    code = run(
+        _rating_argv(out_card=str(card_path)),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+        rasterizer=_tracking_rasterizer,
+    )
+    assert code == 0
+    assert card_path.exists()
+    assert len(calls) == 1, "rasterizer must be called exactly once"
+    svg_passed = calls[0]
+    assert "<svg" in svg_passed, "rasterizer should receive the rendered SVG string"
+    written = card_path.read_bytes()
+    assert written == b"FAKEPNG:" + svg_passed.encode(), "written bytes must match rasterizer return value verbatim"
+
+
+def test_out_card_svg_does_not_call_rasterizer(tmp_path):
+    """--out-card foo.svg does NOT invoke the rasterizer and writes SVG text."""
+    card_path = tmp_path / "card.svg"
+    calls: list[str] = []
+
+    def _tracking_rasterizer(svg: str) -> bytes:  # pragma: no cover
+        calls.append(svg)
+        return b"SHOULD NOT BE CALLED"
+
+    code = run(
+        _rating_argv(out_card=str(card_path)),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+        rasterizer=_tracking_rasterizer,
+    )
+    assert code == 0
+    assert len(calls) == 0, "rasterizer must NOT be called for .svg output"
+    content = card_path.read_text(encoding="utf-8")
+    assert "<svg" in content
+    assert "<?xml" in content
+
+
+def test_out_card_svg_byte_identical_to_render_card(tmp_path):
+    """--out-card foo.svg writes bytes identical to render_card(...) for the same inputs.
+    Passing rasterizer= causes TypeError pre-change (the parameter didn't exist on run()).
+    The spy on render_card captures its return value; the written file must match it."""
+    card_path = tmp_path / "card.svg"
+    captured_svgs: list[str] = []
+
+    def _spy_render_card(*args, **kwargs):
+        svg = render_card(*args, **kwargs)
+        captured_svgs.append(svg)
+        return svg
+
+    def _unreachable_rasterizer(svg: str) -> bytes:
+        raise AssertionError("rasterizer must not be called for .svg output")  # pragma: no cover
+
+    with patch("rating.cli.render_card", _spy_render_card):
+        code = run(
+            _rating_argv(out_card=str(card_path)),
+            extractor=_fake_extractor,
+            runner=_fake_runner,
+            grader_runner=_fake_grader_runner,
+            rasterizer=_unreachable_rasterizer,
+        )
+
+    assert code == 0
+    assert len(captured_svgs) == 1, "render_card must be called exactly once for --out-card .svg"
+    written = card_path.read_text(encoding="utf-8")
+    assert written == captured_svgs[0], "svg output must be byte-identical to render_card() result"
+
+
+# ---------------------------------------------------------------------------
+# N. Missing-extra failure path (task-031)
+# ---------------------------------------------------------------------------
+
+
+def test_out_card_png_missing_extra_nonzero_exit(tmp_path):
+    """CardExtraMissingError from rasterizer → non-zero exit."""
+    from portfolio.card import CardExtraMissingError
+
+    card_path = tmp_path / "card.png"
+
+    def _missing_rasterizer(svg: str) -> bytes:
+        raise CardExtraMissingError("pip install 'portfolio[card]'")
+
+    code = run(
+        _rating_argv(out_card=str(card_path)),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+        rasterizer=_missing_rasterizer,
+    )
+    assert code != 0
+
+
+def test_out_card_png_missing_extra_hint_in_stderr(tmp_path, capsys):
+    """CardExtraMissingError → stderr contains the install hint; no Traceback."""
+    from portfolio.card import CardExtraMissingError
+
+    card_path = tmp_path / "card.png"
+
+    def _missing_rasterizer(svg: str) -> bytes:
+        raise CardExtraMissingError("pip install 'portfolio[card]'")
+
+    run(
+        _rating_argv(out_card=str(card_path)),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+        rasterizer=_missing_rasterizer,
+    )
+    captured = capsys.readouterr()
+    assert "pip install 'portfolio[card]'" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_out_card_png_missing_extra_no_file_created(tmp_path):
+    """CardExtraMissingError → target .png file is NOT created (no partial file)."""
+    from portfolio.card import CardExtraMissingError
+
+    card_path = tmp_path / "card.png"
+
+    def _missing_rasterizer(svg: str) -> bytes:
+        raise CardExtraMissingError("pip install 'portfolio[card]'")
+
+    run(
+        _rating_argv(out_card=str(card_path)),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+        rasterizer=_missing_rasterizer,
+    )
+    assert not card_path.exists(), "target PNG must not be created on missing-extra failure"
+
+
+# ---------------------------------------------------------------------------
+# O. OSError on .png write (task-031)
+# ---------------------------------------------------------------------------
+
+
+def test_out_card_png_oserror_nonzero_exit(capsys):
+    """OSError on .png write (after rasterizer succeeds) → non-zero exit."""
+    bad_path = "/nonexistent_dir_qwerty/card.png"
+    code = run(
+        _rating_argv(out_card=bad_path),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+        rasterizer=_fake_rasterizer,
+    )
+    capsys.readouterr()
+    assert code != 0
+
+
+def test_out_card_png_oserror_clean_stderr(capsys):
+    """OSError on .png write → stderr has a clean error line; no Traceback."""
+    bad_path = "/nonexistent_dir_qwerty/card.png"
+    run(
+        _rating_argv(out_card=bad_path),
+        extractor=_fake_extractor,
+        runner=_fake_runner,
+        grader_runner=_fake_grader_runner,
+        rasterizer=_fake_rasterizer,
+    )
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    err_lines = [ln for ln in captured.err.splitlines() if ln.strip()]
+    assert any("card" in ln.lower() or bad_path in ln or "out-card" in ln.lower() for ln in err_lines)
+
+
+# ---------------------------------------------------------------------------
+# P. svg_to_png raises CardExtraMissingError when cairosvg absent (task-031)
+# ---------------------------------------------------------------------------
+
+
+def test_svg_to_png_raises_card_extra_missing_when_cairosvg_absent():
+    """svg_to_png raises CardExtraMissingError with install-hint when cairosvg is absent.
+    Simulated by patching sys.modules to block cairosvg."""
+    from portfolio.card import CardExtraMissingError, svg_to_png
+
+    with patch.dict(sys.modules, {"cairosvg": None}):
+        with pytest.raises(CardExtraMissingError) as exc_info:
+            svg_to_png("<svg/>")
+
+    assert "pip install 'portfolio[card]'" in str(exc_info.value)
+
+
+def test_svg_to_png_card_extra_missing_is_exception_subclass():
+    """CardExtraMissingError is a subclass of Exception."""
+    from portfolio.card import CardExtraMissingError
+
+    assert issubclass(CardExtraMissingError, Exception)
+
+
+# ---------------------------------------------------------------------------
+# Q. Real cairosvg happy path — guarded by importorskip (task-031)
+# ---------------------------------------------------------------------------
+
+
+def test_svg_to_png_real_png_signature():
+    """With real cairosvg installed, svg_to_png returns non-empty bytes starting with PNG magic.
+    Guarded by pytest.importorskip — skipped when cairosvg is not installed."""
+    pytest.importorskip("cairosvg")
+    from portfolio.card import render_card, svg_to_png
+
+    svg = render_card(_make_profile_result(), _make_grade_result(), subject="alice/repo")
+    result = svg_to_png(svg)
+    assert isinstance(result, bytes)
+    assert len(result) > 0
+    assert result[:8] == b"\x89PNG\r\n\x1a\n", "result must start with PNG signature"
+
+
+# ---------------------------------------------------------------------------
+# R. pyproject.toml shape check (task-031)
+# ---------------------------------------------------------------------------
+
+
+def test_pyproject_card_extra_present_and_no_runtime_deps():
+    """pyproject.toml has card = ['cairosvg'] under optional-dependencies;
+    [project.dependencies] is absent or empty (core install stays dependency-free)."""
+    import tomllib
+
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    with pyproject_path.open("rb") as fh:
+        data = tomllib.load(fh)
+
+    project = data["project"]
+    assert project.get("dependencies", []) == [], "[project.dependencies] must be absent or empty"
+    opt_deps = project.get("optional-dependencies", {})
+    assert "card" in opt_deps, "card optional-dependency must be present"
+    assert opt_deps["card"] == ["cairosvg"], f"card extra must be ['cairosvg'], got {opt_deps['card']!r}"
+
+
+# ---------------------------------------------------------------------------
+# S. rasterizer parameter signature check (task-031)
+# ---------------------------------------------------------------------------
+
+
+def test_run_rasterizer_param_default_is_svg_to_png():
+    """run() has keyword-only rasterizer param whose default is portfolio.card.svg_to_png."""
+    import inspect
+
+    from portfolio.card import svg_to_png as card_svg_to_png
+    from rating.cli import run as cli_run
+
+    params = inspect.signature(cli_run).parameters
+    assert "rasterizer" in params, "run() must have a rasterizer parameter"
+    assert params["rasterizer"].default is card_svg_to_png, "rasterizer default must be portfolio.card.svg_to_png"

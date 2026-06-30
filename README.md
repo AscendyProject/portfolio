@@ -286,9 +286,10 @@ filename in the gist before publish.
 ![Capability rating](https://gist.githubusercontent.com/<user>/<id>/raw/rating-<handle>.svg)
 ```
 
-> **PNG rasterization is planned** as an optional `card` extra (`pip install 'portfolio[card]'`,
-> imported lazily). Not available in v1 — SVG renders natively on GitHub READMEs via the raw
-> gist URL.
+> **PNG output via `--out-card card.png`** — to write a PNG instead of SVG, install the
+> optional `card` extra first: `pip install 'portfolio[card]'` (pulls in `cairosvg` for
+> rasterization). PNG is useful for LinkedIn/X post attachments; the README badge keeps using
+> the raw `.svg` gist URL, which GitHub renders natively.
 
 ## Source types
 
