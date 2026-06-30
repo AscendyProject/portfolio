@@ -655,6 +655,8 @@ def test_extract_merged_mrs_changes_argv_no_shell():
     runner, recorded = _make_enriching_runner()
     extract_merged_mrs(project="grp/proj", author="alice", runner=runner)
     api_calls = [a for a in recorded if a and a[0] == "api"]
+    # Must have issued at least one api/changes call (absent pre-enrichment)
+    assert len(api_calls) > 0
     for call in api_calls:
         # Each element must be a clean string — no semicolons or shell chars
         assert all(isinstance(t, str) for t in call)
@@ -677,6 +679,9 @@ def test_extract_merged_mrs_pr_evidence_ends_with_change_size():
     for e in pr_ev:
         # detail must end with (+N/-N) pattern
         assert e.detail.endswith(f"(+{e.additions}/-{e.deletions})")
+    # _CHANGES_RESPONSE has diff "+new line\n" → 1 addition, 0 deletions per MR.
+    # This asserts real diff-derived sums are used, not the stale list 0/0.
+    assert all(e.additions == 1 and e.deletions == 0 for e in pr_ev)
 
 
 def test_extract_authored_mrs_calls_changes_per_mr():
@@ -806,14 +811,18 @@ def test_best_effort_failure_does_not_preserve_stale_list_stats():
 def test_best_effort_no_token_leak_in_evidence():
     """Token-shaped strings from a runner exception do NOT appear in Evidence."""
     token = "glpat-AAAAAAAAAAAA"
+    api_calls_attempted: list[list[str]] = []
 
     def failing_runner(args: list[str]) -> str:
         if args[0] == "mr":
             return _TWO_MR_LIST
+        api_calls_attempted.append(list(args))
         raise RuntimeError(f"could not auth: {token}")
 
     ev = extract_merged_mrs(project="g/p", author="bob", runner=failing_runner)
 
+    # Enrichment path must have been attempted (absent pre-enrichment code)
+    assert len(api_calls_attempted) > 0
     for e in ev:
         assert token not in (e.detail or "")
         assert token not in (e.ref or "")
@@ -822,14 +831,18 @@ def test_best_effort_no_token_leak_in_evidence():
 def test_best_effort_no_token_leak_authored():
     """Same token-leak check on extract_authored_mrs path."""
     token = "glpat-BBBBBBBBBBBB"
+    api_calls_attempted: list[list[str]] = []
 
     def failing_runner(args: list[str]) -> str:
         if args[0] == "mr":
             return _TWO_MR_LIST
+        api_calls_attempted.append(list(args))
         raise RuntimeError(f"auth error: {token}")
 
     ev = extract_authored_mrs(author="bob", runner=failing_runner)
 
+    # Enrichment path must have been attempted (absent pre-enrichment code)
+    assert len(api_calls_attempted) > 0
     for e in ev:
         assert token not in (e.detail or "")
         assert token not in (e.ref or "")
