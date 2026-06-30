@@ -337,13 +337,22 @@ python -m portfolio --source-type gitlab \
   --source https://gitlab.corp.io/group/project --author <username>
 ```
 
-**v1 limitations:**
+**v1 limitations and behaviour notes:**
 
-- **MR-level evidence only.** `glab mr list` does not return per-file diffs in
-  its list response, so each merged MR produces one `kind="pr"` Evidence record
-  with the MR title + change size. No `kind="file"` Evidence is produced (no
-  per-MR `glab mr view` calls in v1 — add `--limit` to widen the MR scope
-  instead).
+- **Real change-size + per-file evidence (when authenticated).** After the MR
+  list call, each merged MR triggers one additional `glab api
+  projects/<id>/merge_requests/<iid>/changes` call (N+1 cost, bounded by
+  `--limit`). When `glab` is authenticated this returns the per-file unified
+  diffs; the extractor counts code-only added/deleted lines (the same lockfile /
+  vendored-dir / non-code-extension denylist as the GitHub path) and emits one
+  `kind="file"` Evidence per changed code file. When the call fails (no auth,
+  network error, 404), that MR silently falls back to `additions=0 / deletions=0`
+  with no file evidence — the overall extraction never crashes.
+- **Pagination of `changes` not implemented.** GitLab returns a default page of
+  changed files per MR. Very large MRs may silently truncate the changed-file
+  list. Paginating the `changes` response is a follow-up.
+- **Binary files have no line stats.** Binary diffs contain no `+`/`-` text
+  lines and contribute 0 to the change-size count. This is expected behaviour.
 - **Fail-safe masking.** `--mask-private` on a GitLab source relies on the
   existing fail-safe: the `gh repo view` visibility lookup fails for GitLab repos
   (wrong tool) → the repo is treated as private → masked. All GitLab projects are
