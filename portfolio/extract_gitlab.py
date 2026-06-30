@@ -45,19 +45,29 @@ they default to 0 (graceful degradation, never a crash).
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Callable
 
 from .model import Evidence
+
+# Redacts GitLab-format tokens (glpat-..., gloas-..., glcbt-..., etc.) from
+# error text before it is surfaced in RuntimeError messages or logs.
+_TOKEN_RE = re.compile(r"gl[a-z]+-[A-Za-z0-9_-]{10,}")
+
+
+def _sanitize_stderr(text: str) -> str:
+    """Redact token-shaped values from glab stderr before including in errors."""
+    return _TOKEN_RE.sub("[REDACTED]", text)
 
 
 def _run_glab(args: list[str]) -> str:
     """Run ``glab`` with the given argv list and return stdout.
 
     Raises ``RuntimeError`` on non-zero exit (stderr is truncated to 500 chars
-    to avoid echoing large or potentially-sensitive blobs — the same limit as
-    the GitHub analogue ``_run_gh``).  Lets ``FileNotFoundError`` propagate so
-    callers can surface a clean "glab not installed" message.
+    and token-shaped values are redacted before inclusion — no token reaches the
+    error message).  Lets ``FileNotFoundError`` propagate so callers can surface
+    a clean "glab not installed" message.
     """
     proc = subprocess.run(
         ["glab", *args],
@@ -68,7 +78,8 @@ def _run_glab(args: list[str]) -> str:
         check=False,
     )
     if proc.returncode != 0:
-        raise RuntimeError(f"glab {' '.join(args[:3])} failed (rc={proc.returncode}): {proc.stderr.strip()[:500]}")
+        sanitized = _sanitize_stderr(proc.stderr.strip()[:500])
+        raise RuntimeError(f"glab {' '.join(args[:3])} failed (rc={proc.returncode}): {sanitized}")
     return proc.stdout
 
 

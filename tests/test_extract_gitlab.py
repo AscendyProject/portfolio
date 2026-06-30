@@ -370,3 +370,29 @@ def test_nonzero_exit_does_not_echo_full_stderr():
 
     # The full 1000-char blob must not appear in the error message
     assert "X" * 1000 not in str(exc_info.value)
+
+
+def test_run_glab_does_not_include_token_in_error(monkeypatch):
+    """_run_glab must not surface token-shaped values from glab stderr in RuntimeError.
+
+    Patches subprocess.run directly so the real _run_glab code path is exercised,
+    not a fake runner.  A GitLab-format token appearing in glab's stderr must not
+    appear in the raised RuntimeError.
+    """
+    from unittest.mock import MagicMock
+
+    import portfolio.extract_gitlab as _mod
+
+    token = "glpat-xxxxxxxxxxxxxxxxxxxx"
+    mock_proc = MagicMock()
+    mock_proc.returncode = 1
+    mock_proc.stdout = ""
+    mock_proc.stderr = f"could not authenticate: {token}"
+
+    monkeypatch.setattr(_mod.subprocess, "run", lambda *a, **kw: mock_proc)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        # No runner= injected — exercises the real _run_glab → subprocess.run path
+        extract_merged_mrs(project=_PROJECT, author="alice")
+
+    assert token not in str(exc_info.value)
