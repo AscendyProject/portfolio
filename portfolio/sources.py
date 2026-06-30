@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from portfolio.extract import extract_authored_prs, extract_merged_prs
+from portfolio.extract_gitlab import extract_authored_mrs, extract_merged_mrs
 from portfolio.model import Evidence, Portfolio
 from portfolio.web import extract_article_evidence, fetch_html, parse_web_source
 
@@ -30,6 +31,9 @@ from portfolio.web import extract_article_evidence, fetch_html, parse_web_source
 # (e.g. gitlab.com) by name alone, so host *validity* is left to `gh`, which
 # fails with a clear auth error for a host it is not logged into.
 _GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
+# gitlab.com is special-cased in the *return format* (bare namespace/project);
+# any other host is returned host-qualified for self-managed GitLab.
+_GITLAB_HOSTS = frozenset({"gitlab.com", "www.gitlab.com"})
 # owner/repo segments must be clean GitHub names. This rejects %-encoding (e.g.
 # %2F), whitespace, and any other character that would otherwise reach
 # `gh --repo` as garbage instead of being refused up front.
@@ -45,6 +49,9 @@ _HOST_RE = re.compile(
 # GitHub handle: alphanumeric + hyphens only. Leading/trailing hyphens are not
 # valid GitHub usernames; we also reject the bare "-" single-char handle.
 _AUTHOR_RE = re.compile(r"^[A-Za-z0-9-]+$")
+# GitLab username: alphanumeric + hyphens, underscores, and dots. Wider than
+# GitHub (GitLab legally allows "." and "_" in usernames).
+_GITLAB_AUTHOR_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 class UnsupportedSourceError(Exception):
@@ -68,6 +75,11 @@ class SourceRequest:
     # --limit). Default mirrors the extractors' own default; the CLI can raise it
     # to capture more of a prolific author's history. Ignored by web/portfolio.
     limit: int = 100
+    # Injectable extractors for the gitlab / gitlab-author source types (the
+    # `glab` seam). Defaults to the module-level functions; tests substitute
+    # fakes here so the full suite runs without a real `glab` binary.
+    gitlab_extractor: Callable[..., list[Evidence]] = extract_merged_mrs
+    gitlab_author_extractor: Callable[..., list[Evidence]] = extract_authored_mrs
 
 
 @dataclass(frozen=True)
@@ -154,6 +166,122 @@ def parse_github_source(url: str) -> str:
     return f"{host}/{owner}/{repo}"
 
 
+def parse_gitlab_source(url: str) -> str:
+    """Parse a GitLab project URL into the project spec ``glab --repo`` needs.
+
+    Accepts ``http(s)://<host>/<namespace>[/<subgroup>...]/<project>`` with an
+    optional trailing slash or ``.git`` suffix.  Nested namespaces
+    (``group/subgroup/project``) are supported — the path must have **at least
+    two** non-empty segments after the host.
+
+    For ``gitlab.com`` (and ``www.gitlab.com``) the result is the bare
+    ``<namespace>/<project-path>`` (e.g. ``group/subgroup/project``).  For any
+    other host (self-managed GitLab) it is ``<host>/<namespace>/<project-path>``
+    — the form ``glab --repo`` accepts, so the call routes to that server.
+
+    Applies the same SSRF hardening as ``parse_github_source``:
+    rejects IP-literal hosts (canonical ``ipaddress`` + legacy ``inet_aton``
+    forms), userinfo (``user@host``), explicit ports, non-http(s) schemes,
+    query strings, fragments, single-label hosts, and empty/``./..`` path
+    segments.  Raises ``ValueError`` on any violation.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"expected an http(s) URL, got {url!r}")
+    # Reject userinfo (authority spoofing)
+    if parsed.username is not None:
+        raise ValueError(f"userinfo in URL authority is not allowed: {url!r}")
+    # Reject explicit port (inspect raw netloc — same technique as parse_github_source)
+    netloc = parsed.netloc
+    if netloc.startswith("["):
+        close = netloc.find("]")
+        if close >= 0:
+            netloc = netloc[close + 1 :]
+    if ":" in netloc:
+        raise ValueError(f"explicit port is not allowed in {url!r}")
+    host = parsed.hostname
+    if not host:
+        raise ValueError(f"invalid or missing host in {url!r}")
+    # Reject canonical IP-literal hosts
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        raise ValueError(f"IP-literal hosts are not allowed in {url!r}")
+    # Reject legacy / mixed-base IPv4 forms (mirrors parse_github_source)
+    try:
+        socket.inet_aton(host)
+    except OSError:
+        pass
+    else:
+        raise ValueError(f"IP-literal hosts are not allowed in {url!r}")
+    if not _HOST_RE.match(host):
+        raise ValueError(f"invalid or missing host in {url!r}")
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"unexpected query/fragment in {url!r}")
+    # Require at least two non-empty path segments (owner + project).
+    # Keep empties from split so "/owner//project" is rejected, not collapsed.
+    path = parsed.path[:-1] if parsed.path.endswith("/") else parsed.path
+    raw_segments = path.split("/")
+    if not raw_segments or raw_segments[0] != "":
+        raise ValueError(f"expected path starting with /, got {url!r}")
+    parts = raw_segments[1:]  # strip leading empty string from the leading "/"
+    if len(parts) < 2 or any(p == "" for p in parts):
+        raise ValueError(f"expected at least <owner>/<project> in path, got {url!r}")
+    # Strip .git suffix from the final segment
+    final = parts[-1]
+    if final.endswith(".git"):
+        parts = list(parts)
+        parts[-1] = final[:-4]
+    # Validate every segment
+    for p in parts:
+        if not _NAME_RE.match(p) or p in (".", ".."):
+            raise ValueError(f"invalid path segment {p!r} in {url!r}")
+    project_path = "/".join(parts)
+    if host in _GITLAB_HOSTS:
+        return project_path
+    return f"{host}/{project_path}"
+
+
+def _validate_gitlab_author(author: str | None) -> str:
+    """Validate a GitLab username: non-empty, matches ``[A-Za-z0-9._-]+``.
+
+    GitLab usernames may legally include dots and underscores (unlike GitHub
+    handles, which are restricted to ``[A-Za-z0-9-]+``). Raises ``ValueError``
+    on any violation.
+    """
+    if not author:
+        raise ValueError("--author is required for --source-type gitlab-author")
+    if not _GITLAB_AUTHOR_RE.match(author):
+        raise ValueError(
+            f"invalid GitLab username {author!r}: only letters, digits, hyphens, dots, and underscores are allowed"
+        )
+    return author
+
+
+def _gitlab_handler(request: SourceRequest) -> ResolvedSource:
+    """Resolve a project-scoped GitLab source: validate URL + author now, defer extraction."""
+    if not request.source:
+        raise ValueError("--source is required for --source-type gitlab")
+    if not request.author:
+        raise ValueError("--author is required for --source-type gitlab")
+    project = parse_gitlab_source(request.source)
+    author = request.author
+    extractor = request.gitlab_extractor
+    limit = request.limit
+    return ResolvedSource(subject=author, extract=lambda: extractor(project=project, author=author, limit=limit))
+
+
+def _gitlab_author_handler(request: SourceRequest) -> ResolvedSource:
+    """Resolve an author-wide GitLab source: validate author now, defer extraction.
+    ``--source`` is optional and ignored for this source type."""
+    author = _validate_gitlab_author(request.author)
+    extractor = request.gitlab_author_extractor
+    limit = request.limit
+    return ResolvedSource(subject=author, extract=lambda: extractor(author=author, limit=limit))
+
+
 def _github_handler(request: SourceRequest) -> ResolvedSource:
     """Resolve a GitHub source: validate the URL + author now, defer extraction."""
     if not request.source:
@@ -234,6 +362,8 @@ _HANDLERS: dict[str, SourceHandler] = {
     "web": _web_handler,
     "github-author": _github_author_handler,
     "portfolio": _portfolio_handler,
+    "gitlab": _gitlab_handler,
+    "gitlab-author": _gitlab_author_handler,
 }
 
 # Recognized source types that are intentionally NOT implemented yet — reserved

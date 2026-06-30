@@ -310,6 +310,47 @@ All five commands accept `--source-type` to select the evidence source:
 | `web` | article URL (required) | name (required) | fetched article |
 | `github-author` | _(not used)_ | handle (required) | merged PRs across **all** repos the `gh` token can see |
 | `portfolio` | path to a saved `.json` file (required) | _(ignored; subject from file)_ | re-uses a previously saved grounded portfolio |
+| `gitlab` | GitLab project URL (required) | username (required) | merged MRs in one GitLab project |
+| `gitlab-author` | _(not used)_ | username (required) | merged MRs across **all** projects the `glab` token can see |
+
+### GitLab source types (`gitlab` / `gitlab-author`)
+
+**Prerequisite:** the [`glab` CLI](https://gitlab.com/gitlab-org/cli) must be
+installed and authenticated (`glab auth login`). `glab` is an optional external
+dependency — all five commands work without it as long as you don't use a GitLab
+source type.
+
+```bash
+# Project-scoped: merged MRs by <author> in one GitLab project
+python -m portfolio --source-type gitlab \
+  --source https://gitlab.com/<namespace>/<project> --author <username>
+
+# Author-wide: all merged MRs the glab token can see for <username>
+python -m portfolio --source-type gitlab-author --author <username>
+
+# Nested namespaces are fully supported
+python -m portfolio --source-type gitlab \
+  --source https://gitlab.com/group/subgroup/project --author <username>
+
+# Self-managed GitLab (must be authenticated with glab for that host)
+python -m portfolio --source-type gitlab \
+  --source https://gitlab.corp.io/group/project --author <username>
+```
+
+**v1 limitations:**
+
+- **MR-level evidence only.** `glab mr list` does not return per-file diffs in
+  its list response, so each merged MR produces one `kind="pr"` Evidence record
+  with the MR title + change size. No `kind="file"` Evidence is produced (no
+  per-MR `glab mr view` calls in v1 — add `--limit` to widen the MR scope
+  instead).
+- **Fail-safe masking.** `--mask-private` on a GitLab source relies on the
+  existing fail-safe: the `gh repo view` visibility lookup fails for GitLab repos
+  (wrong tool) → the repo is treated as private → masked. All GitLab projects are
+  masked under `--mask-private` regardless of their actual visibility. Pass
+  `--no-mask-on-share` or omit `--mask-private` if you want the project name
+  visible in the output. A `glab`-based precise visibility lookup is a follow-up.
+- **Bitbucket and other SCMs** are not yet supported (follow-up tasks).
 
 ### Save-then-reuse two-step
 

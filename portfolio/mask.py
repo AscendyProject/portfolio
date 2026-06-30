@@ -175,20 +175,38 @@ def extract_repo_names(portfolio: Portfolio) -> set[str]:
             if ghes_result is not None:
                 found.add(ghes_result)
 
-        # evidence.url: collect from any host (host-agnostic)
+        # evidence.url: collect from any host (host-agnostic).
+        # GitLab uses the "/-/" separator between project path and route
+        # (e.g. .../group/subgroup/project/-/merge_requests/42). When present,
+        # take all path segments before "/-/" as the project path so nested
+        # namespaces are captured correctly. For all other hosts (GitHub,
+        # GHES) the existing two-segment logic applies.
         if ev.url:
             try:
                 parsed = urlparse(ev.url)
                 host = parsed.hostname
                 if host:
-                    segments = [s for s in parsed.path.split("/") if s]
-                    if len(segments) >= 2:
-                        candidate = f"{segments[0]}/{segments[1]}"
-                        if _is_valid_owner_repo(candidate):
+                    url_path = parsed.path
+                    if "/-/" in url_path:
+                        # GitLab-style URL: isolate the project path
+                        url_path = url_path[: url_path.index("/-/")]
+                        segments = [s for s in url_path.split("/") if s]
+                        if len(segments) >= 2 and all(_NAME_RE.match(s) and s not in (".", "..") for s in segments):
+                            project_path = "/".join(segments)
                             if host in _MASKABLE_HOSTS:
-                                found.add(candidate.lower())
+                                found.add(project_path.lower())
                             else:
-                                found.add(f"{host}/{candidate}".lower())
+                                found.add(f"{host}/{project_path}".lower())
+                    else:
+                        # GitHub / GHES URL: first two path segments are owner/repo
+                        segments = [s for s in url_path.split("/") if s]
+                        if len(segments) >= 2:
+                            candidate = f"{segments[0]}/{segments[1]}"
+                            if _is_valid_owner_repo(candidate):
+                                if host in _MASKABLE_HOSTS:
+                                    found.add(candidate.lower())
+                                else:
+                                    found.add(f"{host}/{candidate}".lower())
             except Exception:
                 pass
 
@@ -364,8 +382,10 @@ def _build_relabel_map(private: set[str]) -> dict[str, str]:
     extra: dict[str, str] = {}
     for key, label in relabel.items():
         parts = key.split("/")
-        if len(parts) == 3:  # host/owner/repo (GHES)
-            bare = f"{parts[1]}/{parts[2]}"
+        if len(parts) >= 3:  # host/owner/repo (GHES) or host/group/.../project (GitLab)
+            # Add a bare alias (without the host) so free text containing only
+            # the owner/repo or group/.../project substring is also scrubbed.
+            bare = "/".join(parts[1:])
             if bare not in relabel:
                 extra[bare] = label
     relabel.update(extra)
@@ -375,15 +395,22 @@ def _build_relabel_map(private: set[str]) -> dict[str, str]:
 def _rewrite_ref(ref: str, relabel: dict[str, str]) -> str:
     """Rewrite an evidence ref or claim evidence_ref using the relabel map.
 
-    Handles both github.com refs (owner/repo#n, owner/repo:path) and GHES refs
-    (host/owner/repo#n, host/owner/repo:path).  Lookup is case-insensitive
-    because all keys in relabel are lowercase.
+    Handles github.com refs (``owner/repo#n``, ``owner/repo:path``), GHES refs
+    (``host/owner/repo#n``, ``host/owner/repo:path``), and GitLab MR refs
+    (``owner/project-path!iid``, including nested namespaces).
+    Lookup is case-insensitive because all keys in relabel are lowercase.
     """
     if "#" in ref:
         prefix = ref.split("#")[0]
         key = prefix.lower()
         if key in relabel:
             return relabel[key] + "#" + ref[len(prefix) + 1 :]
+    elif "!" in ref:
+        # GitLab MR ref: group/subgroup/project!42
+        prefix = ref.split("!")[0]
+        key = prefix.lower()
+        if key in relabel:
+            return relabel[key] + "!" + ref[len(prefix) + 1 :]
     elif ":" in ref:
         prefix = ref.split(":", 1)[0]
         key = prefix.lower()
