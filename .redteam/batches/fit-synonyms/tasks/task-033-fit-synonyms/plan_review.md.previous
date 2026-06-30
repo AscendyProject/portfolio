@@ -1,0 +1,21 @@
+## redteam adversarial plan review (codex · agent-pair)
+Reviewed `input.md`, `outcome.md`, `state.json`, and `.redteam/prompts/codex/plan_review.md` for task `task-033-fit-synonyms`.
+
+---
+
+PR-001 severity:blocker status:open
+
+`outcome.md` does not include the required parseable `## Verification` fenced `yaml` block with at least one command. The plan-review criteria explicitly blocks when `outcome.md` lacks this structure. The current file has `## Verification hooks` with Markdown bullets, but no fenced YAML block such as:
+
+```yaml
+commands:
+  - bash .redteam/scripts/verify.sh
+```
+
+This must be added under an exact `## Verification` heading before implementation proceeds.
+
+New-test justification: The planned tests are appropriate and would fail against pre-change code because aliases like `k8s`/`kubernetes`, `postgres`/`postgresql`, and `js`/`javascript` currently do not canonicalize to the same token set.
+
+Verification note: This was a plan review only. No verification commands were run, and no files were modified.
+
+REVIEW_DECISION: CHANGES_REQUESTED
