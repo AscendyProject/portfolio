@@ -1,0 +1,22 @@
+## redteam adversarial review (codex · agent-pair)
+Reviewed `git diff main...HEAD` against project hard rules, `.redteam/docs/security-checklist.md`, `.redteam/docs/project-context.md`, `.redteam/prompts/codex/code_review.md`, and task artifacts `input.md`, `outcome.md`, `plan_review.md`, `impl_diff.patch`, `verification.log`, `state.json`.
+---
+IR-001 severity:major status:open
+
+`portfolio/extract_gitlab.py:70-71` surfaces the first 500 chars of `glab` stderr verbatim in the raised `RuntimeError`:
+
+```python
+raise RuntimeError(f"glab {' '.join(args[:3])} failed (rc={proc.returncode}): {proc.stderr.strip()[:500]}")
+```
+
+That does not satisfy the task requirement that non-zero `glab` failures “do not include any token value,” and it conflicts with the security checklist’s “No secrets in logs, commits, or error output” rule. The CLI error boundary prints this exception text to stderr, so any token-shaped value emitted by `glab` in the first 500 chars would reach user-visible error output. Bounding is useful, but it is not redaction. The GitLab path should either avoid echoing external stderr or sanitize token-shaped values before raising.
+
+IR-002 severity:major status:open
+
+The new error-path tests do not actually guard the token-leak requirement. In `tests/test_extract_gitlab.py:346-357`, `failing_runner` raises `"repository not found"`, then the test asserts `"my_secret_token"` is absent. That assertion would pass even if production `_run_glab` printed token-bearing stderr verbatim, because the fake message never contains a token. The long-stderr test at `tests/test_extract_gitlab.py:360-371` similarly simulates already-truncated stderr through the injected runner rather than patching `_run_glab` / `subprocess.run`. Add a test that patches `portfolio.extract_gitlab.subprocess.run` to return non-zero with token-shaped stderr and asserts the raised message does not contain it.
+
+New-test justification: the GitLab source registration/dispatch and parser tests would fail on pre-change code because `gitlab`/`gitlab-author`, `parse_gitlab_source`, and `portfolio.extract_gitlab` did not exist. The masking tests would fail pre-change for nested GitLab `/-/` URLs and `!iid` refs because the masking layer did not recognize that GitLab project shape. The missing-glab tests would fail pre-change because there was no public GitLab extractor surface. However, the non-zero/token stderr tests are insufficient as written for the security acceptance criterion noted above.
+
+Verification note: `state.json` reports `state.verification.last_exit_code == 0`, and `verification.log` shows `bash .redteam/scripts/verify.sh` passed with ruff, ruff format, and `1098 passed, 2 skipped`.
+
+REVIEW_DECISION: CHANGES_REQUESTED

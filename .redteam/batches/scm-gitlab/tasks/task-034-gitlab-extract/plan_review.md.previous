@@ -1,0 +1,21 @@
+## redteam adversarial plan review (codex · agent-pair)
+Reviewed `/Users/kh/Documents/portfolio/.redteam/batches/scm-gitlab/tasks/task-034-gitlab-extract/input.md`, `outcome.md`, and `state.json` against `.redteam/prompts/codex/plan_review.md`.
+
+---
+
+PR-001 severity:blocker status:open
+
+`outcome.md` does not include the required parseable `## Verification` fenced `yaml` block with at least one command. The plan-review rubric explicitly blocks when `outcome.md` lacks this exact structure. The current file has `## Verification hooks` plus prose and bullet lists, but no fenced YAML block such as:
+
+```yaml
+commands:
+  - bash .redteam/scripts/verify.sh
+```
+
+The verification intent is concrete and reasonable, but the harness contract is not satisfied.
+
+New-test justification: Not applicable at plan-review stage; implementation tests have not been added yet. The planned tests are tied to pre-change gaps and should fail before implementation if written as described: unknown `gitlab` source types, missing GitLab parser/extractor, no `glab` runner seam, and no GitLab masking coverage.
+
+Verification note: `state.json` shows phase `plan_review`, no implementation yet, and no verification run is expected at this stage. I did not write files or touch sentinels.
+
+REVIEW_DECISION: CHANGES_REQUESTED
