@@ -25,7 +25,7 @@ from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
 from portfolio.mask import _rewrite_text
 from portfolio.pipeline import resolve_and_optionally_mask
-from portfolio.card import render_card
+from portfolio.card import CardExtraMissingError, render_card, svg_to_png
 from portfolio.share import GistSharer, Sharer, gist_raw_url, share_links
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
@@ -91,6 +91,7 @@ def run(
     grader_runner=_default_grader_runner,
     visibility_lookup=None,
     sharer: Sharer | None = None,
+    rasterizer=svg_to_png,
 ) -> int:
     """Execute the CLI. Returns a process exit code (0 = success).
 
@@ -100,6 +101,10 @@ def run(
 
     `sharer` is an injectable Sharer instance used when --share is set.
     Defaults to GistSharer() when None and --share is active.
+
+    `rasterizer` is called with the SVG string when --out-card targets a .png
+    file; it must return PNG bytes. Defaults to svg_to_png (which lazy-imports
+    cairosvg). Tests inject a fake to avoid requiring the optional card extra.
     """
     args = _build_parser().parse_args(argv)
     lang = args.lang or "en"
@@ -220,11 +225,23 @@ def run(
         # --out-card may be combined with --share; write the local copy now so the
         # file is created regardless of whether the subsequent publish succeeds.
         if args.out_card:
-            try:
-                Path(args.out_card).write_text(card_svg, encoding="utf-8")
-            except OSError as exc:
-                print(f"failed to write --out-card file {args.out_card!r}: {exc}", file=sys.stderr)
-                return 1
+            if args.out_card.lower().endswith(".png"):
+                try:
+                    png_bytes = rasterizer(card_svg)
+                except CardExtraMissingError as exc:
+                    print(str(exc), file=sys.stderr)
+                    return 1
+                try:
+                    Path(args.out_card).write_bytes(png_bytes)
+                except OSError as exc:
+                    print(f"failed to write --out-card file {args.out_card!r}: {exc}", file=sys.stderr)
+                    return 1
+            else:
+                try:
+                    Path(args.out_card).write_text(card_svg, encoding="utf-8")
+                except OSError as exc:
+                    print(f"failed to write --out-card file {args.out_card!r}: {exc}", file=sys.stderr)
+                    return 1
 
         # Publish via the injected (or default) Sharer. On failure, the only stderr
         # output is the single clean error line below (the grounding summary is not
@@ -257,16 +274,29 @@ def run(
 
     print(grounding_summary, file=sys.stderr)
 
-    # --out-card: render and write the SVG card (independent of --share).
+    # --out-card: render and write the card (independent of --share).
+    # .png → rasterize via injected rasterizer and write bytes; else write SVG text.
     if args.out_card:
         card_subject = _scrub_shared(result.portfolio.subject)
         card_svg = render_card(profile_result, grade_result, subject=card_subject, lang=lang)
         card_svg = _scrub_shared(card_svg)
-        try:
-            Path(args.out_card).write_text(card_svg, encoding="utf-8")
-        except OSError as exc:
-            print(f"failed to write --out-card file {args.out_card!r}: {exc}", file=sys.stderr)
-            return 1
+        if args.out_card.lower().endswith(".png"):
+            try:
+                png_bytes = rasterizer(card_svg)
+            except CardExtraMissingError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            try:
+                Path(args.out_card).write_bytes(png_bytes)
+            except OSError as exc:
+                print(f"failed to write --out-card file {args.out_card!r}: {exc}", file=sys.stderr)
+                return 1
+        else:
+            try:
+                Path(args.out_card).write_text(card_svg, encoding="utf-8")
+            except OSError as exc:
+                print(f"failed to write --out-card file {args.out_card!r}: {exc}", file=sys.stderr)
+                return 1
 
     if args.out:
         try:
