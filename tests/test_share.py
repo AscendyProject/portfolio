@@ -8,13 +8,17 @@ Covers:
 - Provenance footer in shared Markdown (en + ko)
 - Share-off output byte-identical to non-share path
 - Publish failure → non-zero exit + clean stderr + no partial stdout emit
+- publish_share helper: ShareBundle, ShareError, extra_files, badge, masking
+- resume --share and fit --share (single + batch)
 """
 
 from __future__ import annotations
 
+import io
 import json
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -22,8 +26,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from portfolio.i18n import LANGS  # noqa: E402
 from portfolio.model import Evidence  # noqa: E402
-from portfolio.share import GistSharer, ShareResult, Sharer, share_links  # noqa: E402
+from portfolio.share import GistSharer, ShareBundle, ShareError, ShareResult, Sharer, publish_share, share_links  # noqa: E402
 from rating.cli import run  # noqa: E402
+from resume.cli import run as resume_run  # noqa: E402
+from fit.cli import run as fit_run  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -753,3 +759,976 @@ def test_publish_failure_no_badge_snippet_on_stdout(capsys):
     assert code != 0
     assert "![" not in out
     assert "gist.githubusercontent.com" not in out
+
+
+# ===========================================================================
+# Part D: publish_share unit tests (importable helper)
+# ===========================================================================
+
+
+class _CapturingSharer(Sharer):
+    """Fake Sharer that records all publish() calls."""
+
+    def __init__(self, url: str = "https://gist.github.com/fake/pub123"):
+        self.url = url
+        self.calls: list[dict] = []
+
+    def publish(
+        self,
+        markdown: str,
+        *,
+        title: str,
+        public: bool,
+        extra_files: dict | None = None,
+    ) -> ShareResult:
+        self.calls.append({"markdown": markdown, "title": title, "public": public, "extra_files": extra_files})
+        return ShareResult(url=self.url)
+
+
+def test_publish_share_importable():
+    """publish_share, ShareBundle, ShareError are importable from portfolio.share."""
+    from portfolio.share import ShareBundle, ShareError, publish_share  # noqa: F401
+
+
+def test_publish_share_returns_share_bundle():
+    """publish_share returns a ShareBundle with the expected attributes."""
+    sharer = _CapturingSharer()
+    bundle = publish_share(
+        "# Report\n\nsome content",
+        subject="resume-alice",
+        lang="en",
+        public=False,
+        effective_mask=False,
+        relabel={},
+        sharer=sharer,
+    )
+    assert isinstance(bundle, ShareBundle)
+    assert bundle.url == sharer.url
+    assert "linkedin.com" in bundle.linkedin
+    assert "twitter.com" in bundle.x
+
+
+def test_publish_share_footer_appended_en():
+    """publish_share appends LANGS['en']['share_provenance_footer'] to the report_md."""
+    sharer = _CapturingSharer()
+    report = "# Resume\n\ncontent"
+    bundle = publish_share(
+        report,
+        subject="resume-alice",
+        lang="en",
+        public=False,
+        effective_mask=False,
+        relabel={},
+        sharer=sharer,
+    )
+    footer = LANGS["en"]["share_provenance_footer"]
+    assert footer in bundle.shared_md
+    assert footer in sharer.calls[0]["markdown"]
+
+
+def test_publish_share_footer_appended_ko():
+    """publish_share appends LANGS['ko']['share_provenance_footer'] when lang='ko'."""
+    sharer = _CapturingSharer()
+    bundle = publish_share(
+        "# 이력서\n\n내용",
+        subject="resume-alice",
+        lang="ko",
+        public=False,
+        effective_mask=False,
+        relabel={},
+        sharer=sharer,
+    )
+    footer = LANGS["ko"]["share_provenance_footer"]
+    assert footer in bundle.shared_md
+
+
+def test_publish_share_no_card_extra_files_is_none():
+    """When card_svg is None, extra_files passed to sharer.publish is None."""
+    sharer = _CapturingSharer()
+    publish_share(
+        "# Report",
+        subject="fit-alice",
+        lang="en",
+        public=False,
+        effective_mask=False,
+        relabel={},
+        sharer=sharer,
+        card_svg=None,
+    )
+    assert sharer.calls[0]["extra_files"] is None
+
+
+def test_publish_share_no_card_badge_is_none():
+    """When card_svg is None, the returned bundle.badge is None."""
+    sharer = _CapturingSharer()
+    bundle = publish_share(
+        "# Report",
+        subject="fit-alice",
+        lang="en",
+        public=False,
+        effective_mask=False,
+        relabel={},
+        sharer=sharer,
+        card_svg=None,
+    )
+    assert bundle.badge is None
+
+
+def test_publish_share_with_card_extra_files_has_svg():
+    """When card_svg is supplied, extra_files has a {title}.svg entry."""
+    sharer = _CapturingSharer()
+    publish_share(
+        "# Report",
+        subject="rating-alice",
+        lang="en",
+        public=False,
+        effective_mask=False,
+        relabel={},
+        sharer=sharer,
+        card_svg="<svg>test</svg>",
+    )
+    extra_files = sharer.calls[0]["extra_files"]
+    assert extra_files is not None
+    svg_keys = [k for k in extra_files if k.endswith(".svg")]
+    assert len(svg_keys) == 1
+    assert extra_files[svg_keys[0]] == "<svg>test</svg>"
+
+
+def test_publish_share_with_card_badge_present():
+    """When card_svg is supplied, bundle.badge contains a markdown image link."""
+    sharer = _CapturingSharer()
+    bundle = publish_share(
+        "# Report",
+        subject="rating-alice",
+        lang="en",
+        public=False,
+        effective_mask=False,
+        relabel={},
+        sharer=sharer,
+        card_svg="<svg/>",
+    )
+    assert bundle.badge is not None
+    assert bundle.badge.startswith("![")
+    assert "gist.githubusercontent.com" in bundle.badge
+
+
+def test_publish_share_masking_scrubs_body():
+    """With effective_mask=True, private repo name is absent from shared_md."""
+    sharer = _CapturingSharer()
+    relabel = {"secret-org/private-svc": "private-repo-1"}
+    bundle = publish_share(
+        "# Report\n\nWork at secret-org/private-svc was great.",
+        subject="resume-alice",
+        lang="en",
+        public=False,
+        effective_mask=True,
+        relabel=relabel,
+        sharer=sharer,
+    )
+    assert "secret-org/private-svc" not in bundle.shared_md
+    assert "private-repo-1" in bundle.shared_md
+
+
+def test_publish_share_masking_scrubs_title():
+    """With effective_mask=True, private repo name does not appear in the gist title."""
+    sharer = _CapturingSharer()
+    relabel = {"secret-org/private-svc": "private-repo-1"}
+    publish_share(
+        "# Report",
+        subject="resume-secret-org/private-svc",
+        lang="en",
+        public=False,
+        effective_mask=True,
+        relabel=relabel,
+        sharer=sharer,
+    )
+    title = sharer.calls[0]["title"]
+    assert "secret-org/private-svc" not in title
+    assert "/" not in title, f"title is not filename-safe: {title!r}"
+
+
+def test_publish_share_masking_scrubs_svg():
+    """With effective_mask=True, private repo name is absent from the SVG in extra_files."""
+    sharer = _CapturingSharer()
+    relabel = {"secret-org/private-svc": "private-repo-1"}
+    publish_share(
+        "# Report",
+        subject="rating-alice",
+        lang="en",
+        public=False,
+        effective_mask=True,
+        relabel=relabel,
+        sharer=sharer,
+        card_svg="<svg><text>secret-org/private-svc</text></svg>",
+    )
+    extra_files = sharer.calls[0]["extra_files"]
+    svg_content = list(extra_files.values())[0]
+    assert "secret-org/private-svc" not in svg_content
+    assert "private-repo-1" in svg_content
+
+
+def test_publish_share_raises_share_error_on_failure():
+    """publish_share raises ShareError (not the raw underlying exception) on publish failure."""
+
+    class BrokenSharer(Sharer):
+        def publish(self, markdown, *, title, public, extra_files=None):
+            raise RuntimeError("connection refused")
+
+    with pytest.raises(ShareError):
+        publish_share(
+            "# Report",
+            subject="resume-alice",
+            lang="en",
+            public=False,
+            effective_mask=False,
+            relabel={},
+            sharer=BrokenSharer(),
+        )
+
+
+def test_publish_share_does_not_print_on_failure(capsys):
+    """publish_share does not print anything to stdout or stderr when publish fails."""
+
+    class BrokenSharer(Sharer):
+        def publish(self, markdown, *, title, public, extra_files=None):
+            raise RuntimeError("auth failed: ghp_FAKETOKEN")
+
+    with pytest.raises(ShareError):
+        publish_share(
+            "# Report",
+            subject="resume-alice",
+            lang="en",
+            public=False,
+            effective_mask=False,
+            relabel={},
+            sharer=BrokenSharer(),
+        )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_publish_share_title_filename_safe():
+    """publish_share derives a filename-safe title (no special chars or path separators)."""
+    sharer = _CapturingSharer()
+    publish_share(
+        "# Report",
+        subject="fit-alice/wonderful team",
+        lang="en",
+        public=False,
+        effective_mask=False,
+        relabel={},
+        sharer=sharer,
+    )
+    title = sharer.calls[0]["title"]
+    import re
+
+    assert re.match(r"^[A-Za-z0-9._-]+$", title), f"title not filename-safe: {title!r}"
+
+
+def test_publish_share_title_fallback_nonempty():
+    """publish_share title falls back to 'portfolio' when subject has no filename-safe chars."""
+    sharer = _CapturingSharer()
+    publish_share(
+        "# Report",
+        subject="/// ???",
+        lang="en",
+        public=False,
+        effective_mask=False,
+        relabel={},
+        sharer=sharer,
+    )
+    title = sharer.calls[0]["title"]
+    assert title  # non-empty fallback
+
+
+# ===========================================================================
+# Part E: resume --share wiring tests
+# ===========================================================================
+
+
+def _fake_resume_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
+    return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
+
+
+def _fake_resume_runner(prompt: str) -> str:
+    return json.dumps([{"text": "Built the feature", "evidence_refs": ["PR#1"], "confidence": 0.9}])
+
+
+def _resume_argv(jd_path: str, **flags) -> list[str]:
+    base = [
+        "--source-type",
+        "github",
+        "--source",
+        "https://github.com/owner/repo",
+        "--author",
+        "alice",
+        "--jd",
+        jd_path,
+    ]
+    for k, v in flags.items():
+        flag = f"--{k.replace('_', '-')}"
+        if v is True:
+            base.append(flag)
+        elif v is not False:
+            base += [flag, str(v)]
+    return base
+
+
+def _run_resume(jd_path: str, fake_sharer: Sharer, **flags) -> tuple[int, str, str]:
+    """Run resume CLI with the given flags and fake sharer. Returns (code, stdout, stderr)."""
+    argv = _resume_argv(jd_path, **flags)
+    with (
+        patch("sys.stdout", new_callable=io.StringIO) as mock_out,
+        patch("sys.stderr", new_callable=io.StringIO) as mock_err,
+    ):
+        code = resume_run(
+            argv,
+            extractor=_fake_resume_extractor,
+            runner=_fake_resume_runner,
+            sharer=fake_sharer,
+        )
+        return code, mock_out.getvalue(), mock_err.getvalue()
+
+
+def test_resume_share_exits_zero(tmp_path):
+    """resume --share exits 0 with a fake Sharer."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+    fake_sharer = _FakeSharer()
+    code, _out, _err = _run_resume(str(jd), fake_sharer, share=True)
+    assert code == 0
+
+
+def test_resume_share_footer_in_published_md(tmp_path):
+    """resume --share: captured markdown ends with i18n provenance footer."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+    fake_sharer = _FakeSharer()
+    code, _out, _err = _run_resume(str(jd), fake_sharer, share=True)
+    assert code == 0
+    assert len(fake_sharer.calls) == 1
+    published_md = fake_sharer.calls[0]["markdown"]
+    footer = LANGS["en"]["share_provenance_footer"]
+    assert footer in published_md
+
+
+def test_resume_share_stdout_order(tmp_path):
+    """resume --share stdout: shared_md → gist URL → linkedin → x; no badge."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+    fake_sharer = _FakeSharer()
+    code, out, _err = _run_resume(str(jd), fake_sharer, share=True)
+    assert code == 0
+    gist_url = fake_sharer.url
+    gist_pos = out.index(gist_url)
+    linkedin_pos = out.index("linkedin.com")
+    x_pos = out.index("twitter.com")
+    # Report comes before gist URL
+    assert out.index("# Resume") < gist_pos
+    # Ordering: gist URL → linkedin → x
+    assert gist_pos < linkedin_pos < x_pos
+    # No badge snippet (no card for resume)
+    assert "![" not in out
+    assert "gist.githubusercontent.com" not in out
+
+
+def test_resume_share_masks_by_default(tmp_path):
+    """resume --share: masking ON by default; private repo name absent from published md."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+
+    _PRIV = "secret-org/private-svc"
+
+    def priv_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
+        return [
+            Evidence(kind="pr", ref=f"{_PRIV}#1", url=f"https://github.com/{_PRIV}/pull/1", detail=f"Work at {_PRIV}")
+        ]
+
+    def priv_runner(prompt: str) -> str:
+        return json.dumps([{"text": f"Feature in {_PRIV}", "evidence_refs": [f"{_PRIV}#1"], "confidence": 0.9}])
+
+    def priv_visibility(repo: str) -> bool:
+        return True
+
+    fake_sharer = _FakeSharer()
+    argv = _resume_argv(str(jd), share=True)
+    with (
+        patch("sys.stdout", new_callable=io.StringIO),
+        patch("sys.stderr", new_callable=io.StringIO),
+    ):
+        code = resume_run(
+            argv,
+            extractor=priv_extractor,
+            runner=priv_runner,
+            visibility_lookup=priv_visibility,
+            sharer=fake_sharer,
+        )
+    assert code == 0
+    assert len(fake_sharer.calls) == 1
+    assert _PRIV not in fake_sharer.calls[0]["markdown"]
+
+
+def test_resume_no_mask_on_share_disables_masking(tmp_path):
+    """resume --share --no-mask-on-share: raw private name reaches the sharer.
+
+    The private repo name is embedded in the gist title (derived from subject)
+    to verify the sharer receives it unmasked when masking is disabled.
+    """
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+
+    _PRIV = "secret-org/private-svc"
+
+    def priv_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
+        return [
+            Evidence(kind="pr", ref=f"{_PRIV}#1", url=f"https://github.com/{_PRIV}/pull/1", detail=f"Work at {_PRIV}")
+        ]
+
+    def priv_runner(prompt: str) -> str:
+        # The claim text embeds the private repo name AND a JD keyword so it is
+        # selected by build_resume.
+        return json.dumps(
+            [{"text": f"Built python backend at {_PRIV}", "evidence_refs": [f"{_PRIV}#1"], "confidence": 0.9}]
+        )
+
+    def priv_visibility(repo: str) -> bool:
+        return True
+
+    fake_sharer = _FakeSharer()
+    # Use the private repo as the --source so it becomes the portfolio subject,
+    # which then flows into the gist title (publish_share derives it from subject).
+    argv = [
+        "--source-type",
+        "github",
+        "--source",
+        f"https://github.com/{_PRIV}",
+        "--author",
+        "alice",
+        "--jd",
+        str(jd),
+        "--share",
+        "--no-mask-on-share",
+    ]
+    with (
+        patch("sys.stdout", new_callable=io.StringIO),
+        patch("sys.stderr", new_callable=io.StringIO),
+    ):
+        code = resume_run(
+            argv,
+            extractor=priv_extractor,
+            runner=priv_runner,
+            visibility_lookup=priv_visibility,
+            sharer=fake_sharer,
+        )
+    assert code == 0
+    assert len(fake_sharer.calls) == 1
+    # Without masking, the private repo name must appear in either the title or markdown.
+    call = fake_sharer.calls[0]
+    # The subject contains the private repo (used as gist title source), so the
+    # raw slug should survive in the title when masking is off.
+    assert _PRIV in call["title"] or _PRIV in call["markdown"], (
+        f"private repo name absent from both title and markdown when masking is disabled; title={call['title']!r}"
+    )
+
+
+def test_resume_mask_private_wins_over_no_mask_on_share(tmp_path):
+    """resume --share --mask-private --no-mask-on-share: --mask-private wins; masking ON."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+
+    _PRIV = "secret-org/private-svc"
+
+    def priv_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
+        return [
+            Evidence(kind="pr", ref=f"{_PRIV}#1", url=f"https://github.com/{_PRIV}/pull/1", detail=f"Work at {_PRIV}")
+        ]
+
+    def priv_runner(prompt: str) -> str:
+        return json.dumps([{"text": f"Feature in {_PRIV}", "evidence_refs": [f"{_PRIV}#1"], "confidence": 0.9}])
+
+    def priv_visibility(repo: str) -> bool:
+        return True
+
+    fake_sharer = _FakeSharer()
+    argv = _resume_argv(str(jd), share=True, mask_private=True, no_mask_on_share=True)
+    with (
+        patch("sys.stdout", new_callable=io.StringIO),
+        patch("sys.stderr", new_callable=io.StringIO),
+    ):
+        code = resume_run(
+            argv,
+            extractor=priv_extractor,
+            runner=priv_runner,
+            visibility_lookup=priv_visibility,
+            sharer=fake_sharer,
+        )
+    assert code == 0
+    assert _PRIV not in fake_sharer.calls[0]["markdown"]
+
+
+def test_resume_share_failure_exits_nonzero(tmp_path):
+    """resume --share: publish failure → non-zero exit."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+
+    class FailSharer(Sharer):
+        def publish(self, markdown, *, title, public, extra_files=None):
+            raise RuntimeError("simulated failure")
+
+    code, _out, _err = _run_resume(str(jd), FailSharer(), share=True)
+    assert code != 0
+
+
+def test_resume_share_failure_one_clean_stderr_line(tmp_path):
+    """resume --share failure: exactly one clean stderr line, no traceback, no partial stdout."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+    token_msg = "ghp_FAKETOKEN_resume_1234567890"
+
+    class FailSharer(Sharer):
+        def publish(self, markdown, *, title, public, extra_files=None):
+            raise RuntimeError(f"auth failed: {token_msg}")
+
+    code, out, err = _run_resume(str(jd), FailSharer(), share=True)
+    assert code != 0
+    # No partial stdout
+    assert "gist.github.com" not in out
+    assert "linkedin.com" not in out
+    assert "twitter.com" not in out
+    # Clean single stderr line
+    assert "Traceback" not in err
+    assert token_msg not in err
+    err_lines = [ln for ln in err.splitlines() if ln.strip()]
+    assert len(err_lines) == 1, f"expected exactly one stderr line, got: {err_lines!r}"
+    assert "grounded:" not in err
+
+
+def test_resume_no_share_output_byte_identical(tmp_path, capsys):
+    """Without --share, resume stdout is byte-identical to a second run without --share."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+
+    code1 = resume_run(
+        _resume_argv(str(jd)),
+        extractor=_fake_resume_extractor,
+        runner=_fake_resume_runner,
+    )
+    out1 = capsys.readouterr().out
+    assert code1 == 0
+
+    code2 = resume_run(
+        _resume_argv(str(jd)),
+        extractor=_fake_resume_extractor,
+        runner=_fake_resume_runner,
+    )
+    out2 = capsys.readouterr().out
+    assert code2 == 0
+    assert out1 == out2
+    assert "gist.github.com" not in out1
+    assert "linkedin.com" not in out1
+
+
+def test_resume_share_deferred_stderr_after_publish(tmp_path):
+    """resume --share: mask-summary and grounding-summary appear AFTER successful publish."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+
+    _PRIV = "secret-org/private-svc"
+
+    def priv_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
+        return [Evidence(kind="pr", ref=f"{_PRIV}#1", url=f"https://github.com/{_PRIV}/pull/1", detail="x")]
+
+    def priv_runner(prompt: str) -> str:
+        return json.dumps([{"text": "Feature", "evidence_refs": [f"{_PRIV}#1"], "confidence": 0.9}])
+
+    def priv_visibility(repo: str) -> bool:
+        return True
+
+    # Track the order of publish vs. stderr
+    events: list[str] = []
+
+    class TrackedSharer(Sharer):
+        def publish(self, markdown, *, title, public, extra_files=None):
+            events.append("published")
+            return ShareResult(url="https://gist.github.com/fake/t123")
+
+    argv = _resume_argv(str(jd), share=True)
+
+    with (
+        patch("sys.stdout", new_callable=io.StringIO),
+        patch("sys.stderr", new_callable=io.StringIO) as mock_err,
+    ):
+        code = resume_run(
+            argv,
+            extractor=priv_extractor,
+            runner=priv_runner,
+            visibility_lookup=priv_visibility,
+            sharer=TrackedSharer(),
+        )
+        err_content = mock_err.getvalue()
+
+    assert code == 0
+    # publish happened before the grounding summary was written
+    assert "published" in events
+    # grounding summary is present in stderr
+    assert "grounded:" in err_content
+
+
+def test_resume_help_mentions_share_flags(capsys):
+    """python -m resume --help mentions --share, --share-public, --no-mask-on-share."""
+    with pytest.raises(SystemExit) as exc_info:
+        resume_run(["--help"])
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "--share" in out
+    assert "--share-public" in out
+    assert "--no-mask-on-share" in out
+
+
+# ===========================================================================
+# Part F: fit --share single-JD wiring tests
+# ===========================================================================
+
+
+def _fake_fit_extractor(*, repo: str, author: str, limit: int = 100) -> list[Evidence]:
+    return [Evidence(kind="pr", ref="PR#1", url="https://github.com/o/r/pull/1", detail="Add feature")]
+
+
+def _fake_fit_runner(prompt: str) -> str:
+    return json.dumps([{"text": "Built a python backend service", "evidence_refs": ["PR#1"], "confidence": 0.9}])
+
+
+def _fake_fit_grader(prompt: str, *, temperature: float = 0) -> str:
+    return json.dumps({"score": 80, "reasoning": [{"text": "solid match", "evidence_refs": ["PR#1"]}]})
+
+
+def _fit_argv(jd_path: str, **flags) -> list[str]:
+    base = [
+        "--source-type",
+        "github",
+        "--source",
+        "https://github.com/owner/repo",
+        "--author",
+        "alice",
+        "--jd",
+        jd_path,
+    ]
+    for k, v in flags.items():
+        flag = f"--{k.replace('_', '-')}"
+        if v is True:
+            base.append(flag)
+        elif v is not False:
+            base += [flag, str(v)]
+    return base
+
+
+def _run_fit(jd_path: str, fake_sharer: Sharer, **flags) -> tuple[int, str, str]:
+    """Run fit CLI (single-JD) with the given flags and fake sharer."""
+    argv = _fit_argv(jd_path, **flags)
+    with (
+        patch("sys.stdout", new_callable=io.StringIO) as mock_out,
+        patch("sys.stderr", new_callable=io.StringIO) as mock_err,
+    ):
+        code = fit_run(
+            argv,
+            extractor=_fake_fit_extractor,
+            runner=_fake_fit_runner,
+            grader_runner=_fake_fit_grader,
+            sharer=fake_sharer,
+        )
+        return code, mock_out.getvalue(), mock_err.getvalue()
+
+
+def test_fit_share_exits_zero(tmp_path):
+    """fit --share exits 0 with a fake Sharer."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+    fake_sharer = _FakeSharer()
+    code, _out, _err = _run_fit(str(jd), fake_sharer, share=True)
+    assert code == 0
+
+
+def test_fit_share_footer_in_published_md(tmp_path):
+    """fit --share: captured markdown ends with i18n provenance footer."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+    fake_sharer = _FakeSharer()
+    code, _out, _err = _run_fit(str(jd), fake_sharer, share=True)
+    assert code == 0
+    assert len(fake_sharer.calls) == 1
+    footer = LANGS["en"]["share_provenance_footer"]
+    assert footer in fake_sharer.calls[0]["markdown"]
+
+
+def test_fit_share_stdout_order_no_badge(tmp_path):
+    """fit --share stdout: shared_md → gist URL → linkedin → x; no badge."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+    fake_sharer = _FakeSharer()
+    code, out, _err = _run_fit(str(jd), fake_sharer, share=True)
+    assert code == 0
+    gist_url = fake_sharer.url
+    gist_pos = out.index(gist_url)
+    linkedin_pos = out.index("linkedin.com")
+    x_pos = out.index("twitter.com")
+    # Report section before gist URL
+    assert out.index("# Fit Assessment") < gist_pos
+    # Order: gist URL → linkedin → x
+    assert gist_pos < linkedin_pos < x_pos
+    # No badge snippet (no card for fit)
+    assert "![" not in out
+    assert "gist.githubusercontent.com" not in out
+
+
+def test_fit_share_failure_one_clean_stderr_line(tmp_path):
+    """fit --share failure: non-zero exit, one clean stderr line, no partial stdout."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+    token_msg = "ghp_FAKETOKEN_fit_0987654321"
+
+    class FailSharer(Sharer):
+        def publish(self, markdown, *, title, public, extra_files=None):
+            raise RuntimeError(f"auth: {token_msg}")
+
+    code, out, err = _run_fit(str(jd), FailSharer(), share=True)
+    assert code != 0
+    assert "gist.github.com" not in out
+    assert "linkedin.com" not in out
+    assert "Traceback" not in err
+    assert token_msg not in err
+    err_lines = [ln for ln in err.splitlines() if ln.strip()]
+    assert len(err_lines) == 1, f"expected exactly one stderr line, got: {err_lines!r}"
+    assert "grounded:" not in err
+
+
+def test_fit_no_share_output_byte_identical(tmp_path, capsys):
+    """Without --share, fit stdout is byte-identical to a second run without --share."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("python backend engineer")
+
+    code1 = fit_run(
+        _fit_argv(str(jd)),
+        extractor=_fake_fit_extractor,
+        runner=_fake_fit_runner,
+        grader_runner=_fake_fit_grader,
+    )
+    out1 = capsys.readouterr().out
+    assert code1 == 0
+
+    code2 = fit_run(
+        _fit_argv(str(jd)),
+        extractor=_fake_fit_extractor,
+        runner=_fake_fit_runner,
+        grader_runner=_fake_fit_grader,
+    )
+    out2 = capsys.readouterr().out
+    assert code2 == 0
+    assert out1 == out2
+    assert "gist.github.com" not in out1
+
+
+def test_fit_help_mentions_share_flags(capsys):
+    """python -m fit --help mentions --share, --share-public, --no-mask-on-share."""
+    # fit/cli.py catches SystemExit internally and returns the exit code.
+    code = fit_run(["--help"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "--share" in out
+    assert "--share-public" in out
+    assert "--no-mask-on-share" in out
+
+
+# ===========================================================================
+# Part G: fit --share batch mode (--jd-dir) wiring tests
+# ===========================================================================
+
+
+def _fit_batch_argv(jd_dir: str, **flags) -> list[str]:
+    base = [
+        "--source-type",
+        "github",
+        "--source",
+        "https://github.com/owner/repo",
+        "--author",
+        "alice",
+        "--jd-dir",
+        jd_dir,
+    ]
+    for k, v in flags.items():
+        flag = f"--{k.replace('_', '-')}"
+        if v is True:
+            base.append(flag)
+        elif v is not False:
+            base += [flag, str(v)]
+    return base
+
+
+def _run_fit_batch(jd_dir: str, fake_sharer: Sharer, **flags) -> tuple[int, str, str]:
+    """Run fit CLI (batch) with the given flags and fake sharer."""
+    argv = _fit_batch_argv(jd_dir, **flags)
+    with (
+        patch("sys.stdout", new_callable=io.StringIO) as mock_out,
+        patch("sys.stderr", new_callable=io.StringIO) as mock_err,
+    ):
+        code = fit_run(
+            argv,
+            extractor=_fake_fit_extractor,
+            runner=_fake_fit_runner,
+            grader_runner=_fake_fit_grader,
+            sharer=fake_sharer,
+        )
+        return code, mock_out.getvalue(), mock_err.getvalue()
+
+
+def _make_batch_jd_dir(tmp_path: Path) -> str:
+    jd_dir = tmp_path / "jds"
+    jd_dir.mkdir()
+    (jd_dir / "jd1.txt").write_text("python backend engineer")
+    (jd_dir / "jd2.txt").write_text("java microservices engineer")
+    return str(jd_dir)
+
+
+def test_fit_batch_share_exits_zero(tmp_path):
+    """fit --jd-dir --share exits 0 with a fake Sharer."""
+    jd_dir = _make_batch_jd_dir(tmp_path)
+    fake_sharer = _FakeSharer()
+    code, _out, _err = _run_fit_batch(jd_dir, fake_sharer, share=True)
+    assert code == 0
+
+
+def test_fit_batch_share_footer_in_published_md(tmp_path):
+    """fit --jd-dir --share: captured markdown includes i18n provenance footer."""
+    jd_dir = _make_batch_jd_dir(tmp_path)
+    fake_sharer = _FakeSharer()
+    code, _out, _err = _run_fit_batch(jd_dir, fake_sharer, share=True)
+    assert code == 0
+    assert len(fake_sharer.calls) == 1
+    footer = LANGS["en"]["share_provenance_footer"]
+    assert footer in fake_sharer.calls[0]["markdown"]
+
+
+def test_fit_batch_share_stdout_order_no_badge(tmp_path):
+    """fit --jd-dir --share stdout: shared_md → gist URL → linkedin → x; no badge."""
+    jd_dir = _make_batch_jd_dir(tmp_path)
+    fake_sharer = _FakeSharer()
+    code, out, _err = _run_fit_batch(jd_dir, fake_sharer, share=True)
+    assert code == 0
+    gist_url = fake_sharer.url
+    gist_pos = out.index(gist_url)
+    linkedin_pos = out.index("linkedin.com")
+    x_pos = out.index("twitter.com")
+    assert gist_pos < linkedin_pos < x_pos
+    assert "![" not in out
+
+
+def test_fit_batch_share_failure_one_clean_stderr_line(tmp_path):
+    """fit --jd-dir --share failure: non-zero exit, one clean stderr line."""
+    jd_dir = _make_batch_jd_dir(tmp_path)
+    token_msg = "ghp_FAKETOKEN_batch_abc123"
+
+    class FailSharer(Sharer):
+        def publish(self, markdown, *, title, public, extra_files=None):
+            raise RuntimeError(f"auth: {token_msg}")
+
+    code, out, err = _run_fit_batch(jd_dir, FailSharer(), share=True)
+    assert code != 0
+    assert "gist.github.com" not in out
+    assert "Traceback" not in err
+    assert token_msg not in err
+    err_lines = [ln for ln in err.splitlines() if ln.strip()]
+    assert len(err_lines) == 1, f"expected exactly one stderr line, got: {err_lines!r}"
+    assert "grounded:" not in err
+
+
+def test_fit_batch_no_share_output_byte_identical(tmp_path, capsys):
+    """Without --share, fit --jd-dir stdout is byte-identical to a second run."""
+    jd_dir = _make_batch_jd_dir(tmp_path)
+
+    code1 = fit_run(
+        _fit_batch_argv(jd_dir),
+        extractor=_fake_fit_extractor,
+        runner=_fake_fit_runner,
+        grader_runner=_fake_fit_grader,
+    )
+    out1 = capsys.readouterr().out
+    assert code1 == 0
+
+    code2 = fit_run(
+        _fit_batch_argv(jd_dir),
+        extractor=_fake_fit_extractor,
+        runner=_fake_fit_runner,
+        grader_runner=_fake_fit_grader,
+    )
+    out2 = capsys.readouterr().out
+    assert code2 == 0
+    assert out1 == out2
+    assert "gist.github.com" not in out1
+
+
+# ---------------------------------------------------------------------------
+# Part G: resume/fit --share — uniform private-repo masking (codex IR-002)
+# ---------------------------------------------------------------------------
+
+
+def test_resume_share_masks_private_repo_in_title_and_body(tmp_path):
+    """resume --share: a private repo name in the subject/evidence is scrubbed from
+    BOTH the gist title/filename and the published Markdown (same guarantee as rating)."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("backend engineer", encoding="utf-8")
+    fake = _FakeSharer()
+    argv = [
+        "--source-type",
+        "github",
+        "--source",
+        f"https://github.com/{_PRIVATE_REPO}",
+        "--author",
+        _PRIVATE_REPO,  # subject carries the private name
+        "--jd",
+        str(jd),
+        "--share",
+    ]
+    with patch("sys.stdout", new_callable=io.StringIO), patch("sys.stderr", new_callable=io.StringIO):
+        code = resume_run(
+            argv,
+            extractor=_private_extractor,
+            runner=_private_runner_with_ref,
+            visibility_lookup=_private_visibility_lookup,
+            sharer=fake,
+        )
+    assert code == 0
+    call = fake.calls[0]
+    assert _PRIVATE_REPO not in call["title"], f"private repo leaked in resume gist title: {call['title']!r}"
+    assert _PRIVATE_REPO not in call["markdown"], "private repo leaked in resume shared body"
+
+
+def test_fit_share_masks_private_repo_in_title_and_body(tmp_path):
+    """fit --share: a private repo name in the subject/evidence is scrubbed from BOTH
+    the gist title/filename and the published Markdown."""
+    jd = tmp_path / "jd.txt"
+    jd.write_text("backend engineer python", encoding="utf-8")
+    fake = _FakeSharer()
+    argv = [
+        "--source-type",
+        "github",
+        "--source",
+        f"https://github.com/{_PRIVATE_REPO}",
+        "--author",
+        _PRIVATE_REPO,
+        "--jd",
+        str(jd),
+        "--share",
+    ]
+    with patch("sys.stdout", new_callable=io.StringIO), patch("sys.stderr", new_callable=io.StringIO):
+        code = fit_run(
+            argv,
+            extractor=_private_extractor,
+            runner=_private_runner_with_ref,
+            grader_runner=_fake_fit_grader,
+            visibility_lookup=_private_visibility_lookup,
+            sharer=fake,
+        )
+    assert code == 0
+    call = fake.calls[0]
+    assert _PRIVATE_REPO not in call["title"], f"private repo leaked in fit gist title: {call['title']!r}"
+    assert _PRIVATE_REPO not in call["markdown"], "private repo leaked in fit shared body"

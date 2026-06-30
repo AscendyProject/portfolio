@@ -1,24 +1,59 @@
 """Provider-agnostic share seam for publishing Markdown artifacts to a URL.
 
 Exports:
-  ShareResult   — dataclass carrying the published .url
-  Sharer        — abstract base (protocol) for publish(markdown, *, title, public)
-  GistSharer    — GistSharer.publish() shells `gh gist create` (injectable runner)
-  share_links() — returns pre-filled LinkedIn and X intent URLs (URL-encoded)
+  ShareResult    — dataclass carrying the published .url
+  ShareBundle    — dataclass carrying the full publish output (url, links, badge, md)
+  ShareError     — exception raised when Sharer.publish fails inside publish_share
+  Sharer         — abstract base (protocol) for publish(markdown, *, title, public)
+  GistSharer     — GistSharer.publish() shells `gh gist create` (injectable runner)
+  share_links()  — returns pre-filled LinkedIn and X intent URLs (URL-encoded)
+  gist_raw_url() — maps a gist URL + filename to the raw CDN URL
+  publish_share()— end-to-end helper: footer + mask + publish + return ShareBundle
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 import tempfile
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import i18n as _i18n
+from .mask import _rewrite_text
+
 
 @dataclass
 class ShareResult:
     url: str
+
+
+class ShareError(Exception):
+    """Raised by publish_share when the underlying Sharer.publish fails.
+
+    The exception message never contains gh stderr, token text, or raw argv —
+    the caller is responsible for emitting exactly one clean stderr line.
+    """
+
+
+@dataclass
+class ShareBundle:
+    """The complete output of a successful publish_share call.
+
+    Attributes:
+      shared_md  — the footer-bearing (and optionally masked) Markdown published.
+      url        — the gist URL returned by the Sharer.
+      linkedin   — pre-filled LinkedIn share intent URL.
+      x          — pre-filled X (Twitter) share intent URL.
+      badge      — README badge snippet (``![…](raw_url)``), or None when no card.
+    """
+
+    shared_md: str
+    url: str
+    linkedin: str
+    x: str
+    badge: str | None
 
 
 class Sharer:
@@ -153,3 +188,82 @@ def share_links(url: str, summary: str) -> dict[str, str]:
     linkedin = f"https://www.linkedin.com/sharing/share-offsite/?url={enc_url}&summary={enc_summary}"
     x = f"https://twitter.com/intent/tweet?url={enc_url}&text={enc_summary}"
     return {"linkedin": linkedin, "x": x}
+
+
+def publish_share(
+    report_md: str,
+    *,
+    subject: str,
+    lang: str,
+    public: bool,
+    effective_mask: bool,
+    relabel: dict[str, str],
+    sharer: "Sharer",
+    card_svg: str | None = None,
+    summary: str = "My grounded portfolio",
+) -> ShareBundle:
+    """Append provenance footer, optionally mask, publish, and return a ShareBundle.
+
+    Args:
+      report_md      — the rendered Markdown report (WITHOUT the footer yet).
+      subject        — string used to derive the gist filename (e.g. "rating-alice").
+      lang           — i18n language code; selects the provenance footer string.
+      public         — whether the Gist should be public (True) or secret (False).
+      effective_mask — when True AND relabel is non-empty, body / title / svg are
+                       scrubbed via ``portfolio.mask._rewrite_text`` (case-insensitive,
+                       longest-first collision-safe).
+      relabel        — the mask relabel map from ``resolve_and_optionally_mask``.
+      sharer         — injectable Sharer instance (GistSharer() when omitted by CLIs).
+      card_svg       — when supplied, included as ``{title}.svg`` in extra_files and
+                       the returned bundle carries a README badge snippet.
+
+    Returns:
+      ShareBundle with shared_md, url, linkedin, x, badge (None if no card).
+
+    Raises:
+      ShareError when sharer.publish raises; does NOT write to stdout or stderr.
+    """
+
+    def _scrub(s: str) -> str:
+        return _rewrite_text(s, relabel) if (effective_mask and relabel) else s
+
+    # 1. Append provenance footer.
+    footer = _i18n.LANGS[lang]["share_provenance_footer"]
+    shared_md = report_md + "\n\n" + footer + "\n"
+
+    # 2. Scrub body so no raw private repo name can reach the gist.
+    shared_md = _scrub(shared_md)
+
+    # 3. Derive a filename-safe gist title from subject.
+    title = re.sub(r"[^A-Za-z0-9._-]+", "-", _scrub(subject)).strip("-") or "portfolio"
+
+    # 4. Prepare the SVG card (if supplied) and build extra_files.
+    extra_files: dict[str, str] | None = None
+    svg_filename: str | None = None
+    if card_svg is not None:
+        scrubbed_svg = _scrub(card_svg)
+        svg_filename = f"{title}.svg"
+        extra_files = {svg_filename: scrubbed_svg}
+
+    # 5. Publish — on any exception raise ShareError (no print here).
+    try:
+        share_result = sharer.publish(shared_md, title=title, public=public, extra_files=extra_files)
+    except Exception as exc:
+        raise ShareError("could not publish to Gist") from exc
+
+    # 6. Build social share links.
+    links = share_links(share_result.url, f"{summary}: {share_result.url}")
+
+    # 7. Build README badge snippet if a card was published.
+    badge: str | None = None
+    if svg_filename is not None:
+        raw_url = gist_raw_url(share_result.url, svg_filename)
+        badge = f"![Capability rating]({raw_url})"
+
+    return ShareBundle(
+        shared_md=shared_md,
+        url=share_result.url,
+        linkedin=links["linkedin"],
+        x=links["x"],
+        badge=badge,
+    )

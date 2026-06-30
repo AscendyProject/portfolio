@@ -26,6 +26,7 @@ from portfolio.jd_source import JDFetchError, JDFileReadError, JDInvalidURLError
 from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
 from portfolio.pipeline import resolve_and_optionally_mask
+from portfolio.share import GistSharer, ShareError, Sharer, publish_share
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
 
@@ -61,6 +62,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lang", choices=tuple(i18n.LANGS), default=None, help="output language code (default: auto-detect from JD)"
     )
+    parser.add_argument(
+        "--share", action="store_true", default=False, help="publish fit report to a GitHub Gist and print share links"
+    )
+    parser.add_argument(
+        "--share-public", action="store_true", default=False, help="make the Gist public (default: secret)"
+    )
+    parser.add_argument(
+        "--no-mask-on-share",
+        action="store_true",
+        default=False,
+        help="disable auto-masking when --share is set",
+    )
     return parser
 
 
@@ -72,12 +85,16 @@ def run(
     fetcher=fetch_html,
     grader_runner: GraderRunner = default_grader_runner,
     visibility_lookup=None,
+    sharer: Sharer | None = None,
 ) -> int:
     """Execute the /fit CLI. Returns a process exit code (0 = success).
 
     `extractor` (gh), `fetcher` (web fetch), `runner` (narrative model), and
     `grader_runner` (bounded grader model) are injectable seams: the defaults hit
     live services, but tests pass fakes so no live service is required.
+
+    `sharer` is an injectable Sharer instance used when --share is set.
+    Defaults to GistSharer() when None and --share is active.
     """
     try:
         args = _build_parser().parse_args(argv)
@@ -95,10 +112,19 @@ def run(
     # ── Batch mode (--jd-dir) ─────────────────────────────────────────────────
     if args.jd_dir is not None:
         return _run_batch(
-            args, extractor=extractor, runner=runner, fetcher=fetcher, visibility_lookup=visibility_lookup
+            args,
+            extractor=extractor,
+            runner=runner,
+            fetcher=fetcher,
+            visibility_lookup=visibility_lookup,
+            sharer=sharer,
         )
 
     # ── Single-JD mode (--jd) — original path, byte-identical output ─────────
+    # Privacy-first mask resolution: --share enables masking by default unless
+    # --no-mask-on-share is explicitly given. --mask-private always wins.
+    effective_mask = args.mask_private or (args.share and not args.no_mask_on_share)
+
     # Load the JD (file path or http(s) URL) — fail early with a clean error.
     try:
         jd_text = load_jd(args.jd, fetcher=fetcher)
@@ -134,7 +160,7 @@ def run(
             resolved,
             subject=resolved.subject,
             runner=runner,
-            mask_private=args.mask_private,
+            mask_private=effective_mask,
             synthesis_runner=None,
             visibility_lookup=visibility_lookup,
             lang=lang,
@@ -143,8 +169,11 @@ def run(
         print(f"failed to build portfolio: {exc}", file=sys.stderr)
         return 1
 
-    if args.mask_private:
-        print(f"masked {n_masked} private repo(s)", file=sys.stderr)
+    # On the --share path every pre-publish stderr line is deferred until publish
+    # succeeds (so a failure emits exactly one clean error line — IR-003).
+    mask_summary = f"masked {n_masked} private repo(s)" if effective_mask else None
+    if mask_summary and not args.share:
+        print(mask_summary, file=sys.stderr)
 
     # Deterministic grade
     score_result = score_fit(result.portfolio, jd_text)
@@ -153,7 +182,7 @@ def run(
     grade_result = bounded_grade(result.portfolio, score_result.grade, score_result.band, grader_runner, lang=lang)
 
     # Post-model scrub: replace any private owner/repo the grader emitted
-    if args.mask_private and result.relabel:
+    if effective_mask and result.relabel:
         from fit.grade import GradeResult as _GradeResult
 
         def _scrub(s: str) -> str:
@@ -172,14 +201,43 @@ def run(
 
     markdown = render_fit(score_result, grade_result, show_refs=args.show_refs, lang=lang)
 
-    # Grounding summary → stderr only
     grounding = result.grounding
-    print(
+    grounding_summary = (
         f"grounded: {len(grounding.grounded)}  "
         f"rejected: {len(grounding.rejected)}  "
-        f"needs-confirmation: {len(grounding.needs_confirmation)}",
-        file=sys.stderr,
+        f"needs-confirmation: {len(grounding.needs_confirmation)}"
     )
+
+    if args.share:
+        active_sharer = sharer if sharer is not None else GistSharer()
+        try:
+            bundle = publish_share(
+                markdown,
+                subject=f"fit-{result.portfolio.subject}",
+                lang=lang,
+                public=args.share_public,
+                effective_mask=effective_mask,
+                relabel=result.relabel,
+                sharer=active_sharer,
+                card_svg=None,
+                summary="My grounded JD fit",
+            )
+        except ShareError:
+            print("share failed: could not publish to Gist", file=sys.stderr)
+            return 1
+
+        # Success: deferred stderr lines, then stdout lines (no badge for fit).
+        if mask_summary:
+            print(mask_summary, file=sys.stderr)
+        print(grounding_summary, file=sys.stderr)
+        emit_markdown(bundle.shared_md)
+        print(bundle.url)
+        print(bundle.linkedin)
+        print(bundle.x)
+        return 0
+
+    # Non-share path: grounding summary now.
+    print(grounding_summary, file=sys.stderr)
 
     if args.out:
         try:
@@ -199,6 +257,7 @@ def _run_batch(
     runner,
     fetcher,
     visibility_lookup,
+    sharer: Sharer | None = None,
 ) -> int:
     """Execute batch mode: score the portfolio against every JD in --jd-dir."""
     jd_dir = Path(args.jd_dir)
@@ -222,6 +281,9 @@ def _run_batch(
 
     # Language: explicit --lang wins; batch mode defaults to "en" (no auto-detect from JD).
     lang = args.lang if args.lang is not None else "en"
+
+    # Privacy-first mask resolution (same as single-JD mode).
+    effective_mask = args.mask_private or (args.share and not args.no_mask_on_share)
 
     # Resolve the source (validation/parse only — no extraction yet).
     try:
@@ -255,7 +317,7 @@ def _run_batch(
             resolved,
             subject=resolved.subject,
             runner=runner,
-            mask_private=args.mask_private,
+            mask_private=effective_mask,
             synthesis_runner=None,
             visibility_lookup=visibility_lookup,
             lang=lang,
@@ -264,8 +326,10 @@ def _run_batch(
         print(f"failed to build portfolio: {exc}", file=sys.stderr)
         return 1
 
-    if args.mask_private:
-        print(f"masked {n_masked} private repo(s)", file=sys.stderr)
+    # On the --share path defer mask summary until after successful publish.
+    mask_summary = f"masked {n_masked} private repo(s)" if effective_mask else None
+    if mask_summary and not args.share:
+        print(mask_summary, file=sys.stderr)
 
     portfolio = result.portfolio
 
@@ -275,16 +339,45 @@ def _run_batch(
         score_result = score_fit(portfolio, jd_text)
         batch_results.append((name, score_result))
 
-    # Grounding summary → stderr, exactly once.
     grounding = result.grounding
-    print(
+    grounding_summary = (
         f"grounded: {len(grounding.grounded)}  "
         f"rejected: {len(grounding.rejected)}  "
-        f"needs-confirmation: {len(grounding.needs_confirmation)}",
-        file=sys.stderr,
+        f"needs-confirmation: {len(grounding.needs_confirmation)}"
     )
 
     markdown = render_fit_batch(batch_results, lang=lang)
+
+    if args.share:
+        active_sharer = sharer if sharer is not None else GistSharer()
+        try:
+            bundle = publish_share(
+                markdown,
+                subject=f"fit-{result.portfolio.subject}",
+                lang=lang,
+                public=args.share_public,
+                effective_mask=effective_mask,
+                relabel=result.relabel,
+                sharer=active_sharer,
+                card_svg=None,
+                summary="My grounded JD fit",
+            )
+        except ShareError:
+            print("share failed: could not publish to Gist", file=sys.stderr)
+            return 1
+
+        # Success: deferred stderr lines, then stdout lines.
+        if mask_summary:
+            print(mask_summary, file=sys.stderr)
+        print(grounding_summary, file=sys.stderr)
+        emit_markdown(bundle.shared_md)
+        print(bundle.url)
+        print(bundle.linkedin)
+        print(bundle.x)
+        return 0
+
+    # Non-share path: grounding summary now.
+    print(grounding_summary, file=sys.stderr)
 
     if args.out:
         try:

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -26,7 +25,7 @@ from portfolio.output import emit_markdown
 from portfolio.mask import _rewrite_text
 from portfolio.pipeline import resolve_and_optionally_mask
 from portfolio.card import CardExtraMissingError, render_card, svg_to_png
-from portfolio.share import GistSharer, Sharer, gist_raw_url, share_links
+from portfolio.share import GistSharer, ShareError, Sharer, publish_share
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
 from rating.grade import grade
@@ -199,28 +198,11 @@ def run(
         return _rewrite_text(s, result.relabel) if (effective_mask and result.relabel) else s
 
     if args.share:
-        # Append provenance footer — share path only; non-share render stays byte-identical.
-        footer = i18n.LANGS[lang]["share_provenance_footer"]
-        shared_markdown = markdown + "\n\n" + footer + "\n"
-
-        # The shared artifact and its gist filename are channels that bypass the
-        # evidence/claim masking applied during the pipeline — e.g. `render_rating`
-        # renders the subject verbatim into the heading. Scrub the FULL shared Markdown
-        # AND the title with the same relabel map so no raw private repo name (from the
-        # subject or anywhere else) can reach the gist body or filename.
-        shared_markdown = _scrub_shared(shared_markdown)
-
-        # Title → gist filename: scrub with the relabel map, then restrict to
-        # filename-safe characters (no path separators / odd bytes reach `gh`).
-        title = re.sub(r"[^A-Za-z0-9._-]+", "-", _scrub_shared(f"rating-{result.portfolio.subject}")).strip("-") or (
-            "rating"
-        )
-
-        # Render the SVG card (subject + card body both scrubbed before publish).
+        # Render and scrub the SVG card (subject scrubbed before render so the card
+        # body is clean; scrub the full SVG afterward to catch any remaining refs).
         card_subject = _scrub_shared(result.portfolio.subject)
         card_svg = render_card(profile_result, grade_result, subject=card_subject, lang=lang)
         card_svg = _scrub_shared(card_svg)
-        svg_filename = f"{title}.svg"
 
         # --out-card may be combined with --share; write the local copy now so the
         # file is created regardless of whether the subsequent publish succeeds.
@@ -243,18 +225,22 @@ def run(
                     print(f"failed to write --out-card file {args.out_card!r}: {exc}", file=sys.stderr)
                     return 1
 
-        # Publish via the injected (or default) Sharer. On failure, the only stderr
-        # output is the single clean error line below (the grounding summary is not
-        # emitted yet), satisfying the single-line failure contract.
+        # Publish via the shared helper. On failure, the only stderr output is the
+        # single clean error line below (grounding summary not emitted yet — IR-003).
         active_sharer = sharer if sharer is not None else GistSharer()
         try:
-            share_result = active_sharer.publish(
-                shared_markdown,
-                title=title,
+            bundle = publish_share(
+                markdown,
+                subject=f"rating-{result.portfolio.subject}",
+                lang=lang,
                 public=args.share_public,
-                extra_files={svg_filename: card_svg},
+                effective_mask=effective_mask,
+                relabel=result.relabel,
+                sharer=active_sharer,
+                card_svg=card_svg,
+                summary="My grounded capability rating",
             )
-        except Exception:
+        except ShareError:
             print("share failed: could not publish to Gist", file=sys.stderr)
             return 1
 
@@ -263,13 +249,12 @@ def run(
         if mask_summary:
             print(mask_summary, file=sys.stderr)
         print(grounding_summary, file=sys.stderr)
-        emit_markdown(shared_markdown)
-        links = share_links(share_result.url, f"My grounded capability rating: {share_result.url}")
-        print(share_result.url)
-        print(links["linkedin"])
-        print(links["x"])
-        raw_url = gist_raw_url(share_result.url, svg_filename)
-        print(f"![Capability rating]({raw_url})")
+        emit_markdown(bundle.shared_md)
+        print(bundle.url)
+        print(bundle.linkedin)
+        print(bundle.x)
+        if bundle.badge:
+            print(bundle.badge)
         return 0
 
     # --out-card: render and write the card (independent of --share).
