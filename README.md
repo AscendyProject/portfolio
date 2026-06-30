@@ -191,6 +191,15 @@ mode. An explicit `--lang ko` (or `--lang en`) overrides the default.
 The `/fit` slash command is the interactive front door; `--out <file>` writes to
 a file instead of stdout.
 
+**Single-token synonym matching:** fit coverage now recognises a pinned set of
+unambiguous tech abbreviations and aliases, so a JD requirement and a portfolio
+claim match even when they use different surface tokens — for example `k8s` and
+`kubernetes`, `postgres` and `postgresql`, or `js` and `javascript` are all treated
+as equivalent during keyword coverage scoring. The alias table is deterministic and
+pinned in code (no model call, no network). Multi-word phrase aliases (e.g.
+`google cloud` ↔ `gcp`) and embedding-based semantic matching are explicit
+non-goals for v1 and are tracked separately under issue #37.
+
 ### `/rating` command
 
 Run `python -m rating --source-type <type> --source <url> --author <handle>` to produce

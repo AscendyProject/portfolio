@@ -89,8 +89,32 @@ JD_META_STOPWORDS: frozenset[str] = frozenset(
     }
 )
 
+# ── Tech synonym / alias table ────────────────────────────────────────────────
+# Pinned, high-precision single-token aliases: alias → canonical (both lowercase ASCII).
+# Applied after the stopword/len/digit filters and before _stem, so both the JD side
+# and the claim side (which routes through jd_keywords) collapse to the same token.
+# v1 is single-token only; phrase aliases (e.g. "google cloud" ↔ "gcp") and
+# embedding-based semantic matching are explicit non-goals (tracked under issue #37).
+# Ambiguous/risky keys (c, r, go, ml, ai) are intentionally omitted.
+TECH_ALIASES: dict[str, str] = {
+    "k8s": "kubernetes",  # Kubernetes shorthand used widely in ops/infra JDs
+    "js": "javascript",  # JavaScript canonical name
+    "ts": "typescript",  # TypeScript canonical name
+    "py": "python",  # Python script/file shorthand
+    "postgres": "postgresql",  # PostgreSQL common alias
+    "pg": "postgresql",  # PostgreSQL ultra-short alias
+    "golang": "go",  # Go programming language full name
+    "ror": "rails",  # Ruby on Rails abbreviation
+    "tf": "terraform",  # Terraform IaC tool shorthand
+}
+
 
 # ── Private helpers ───────────────────────────────────────────────────────────
+
+
+def _alias(token: str) -> str:
+    """Return the canonical form of a tech alias; passthrough if not in TECH_ALIASES."""
+    return TECH_ALIASES.get(token, token)
 
 
 def _strip_meta_lines(text: str) -> str:
@@ -189,8 +213,8 @@ def jd_keywords(jd_text: str) -> set[str]:
         # Drop pure-digit tokens
         if low.isdigit():
             continue
-        # Apply stemming
-        result.add(_stem(low))
+        # Apply alias canonicalization (passthrough on miss) then stemming
+        result.add(_stem(_alias(low)))
     return result
 
 
