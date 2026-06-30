@@ -770,6 +770,39 @@ def test_best_effort_one_mr_failure_other_succeeds():
     assert any(e.kind == "file" for e in ev)
 
 
+def test_best_effort_failure_does_not_preserve_stale_list_stats():
+    """When per-MR changes call fails, additions/deletions must be 0/0 — NOT the
+    stale values from the MR list payload.  IR-001: the else-branch in
+    _enrich_evidence_list must never fall back to the original ev."""
+    stale_list = json.dumps(
+        [
+            {
+                "iid": 5,
+                "project_id": 777,
+                "title": "Stale stats MR",
+                "web_url": "https://gitlab.com/a/b/-/merge_requests/5",
+                "references": {"full": "a/b!5"},
+                "additions": 100,  # stale — must NOT appear in enriched output
+                "deletions": 50,  # stale — must NOT appear in enriched output
+            }
+        ]
+    )
+
+    def failing_runner(args: list[str]) -> str:
+        if args[0] == "mr":
+            return stale_list
+        raise RuntimeError("auth failed")
+
+    ev = extract_merged_mrs(project="a/b", author="carol", runner=failing_runner)
+    pr_ev = [e for e in ev if e.kind == "pr"]
+    assert len(pr_ev) == 1
+    mr = pr_ev[0]
+    # Must use enrichment result (0/0), NOT the stale list-level values (100/50)
+    assert mr.additions == 0, f"stale additions leaked: got {mr.additions}"
+    assert mr.deletions == 0, f"stale deletions leaked: got {mr.deletions}"
+    assert "(+0/-0)" in mr.detail
+
+
 def test_best_effort_no_token_leak_in_evidence():
     """Token-shaped strings from a runner exception do NOT appear in Evidence."""
     token = "glpat-AAAAAAAAAAAA"

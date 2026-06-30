@@ -310,30 +310,30 @@ def _enrich_evidence_list(
     """Enrich each ``kind="pr"`` Evidence with per-MR changes (best-effort).
 
     For each MR, fetches ``glab api projects/<id>/merge_requests/<iid>/changes``
-    through the injectable runner.  On success the ``kind="pr"`` Evidence is
-    replaced with one that carries the real code-only additions/deletions and the
-    ``detail`` ends with ``(+A/-D)``.  Per-file ``kind="file"`` Evidence records
-    are appended.  Any failure for one MR silently degrades that MR to ``0/0``
-    with no file evidence; the others are unaffected.
+    through the injectable runner.  The ``kind="pr"`` Evidence is always replaced
+    with one that carries the enrichment result: code-only additions/deletions and
+    ``detail`` ending with ``(+A/-D)``.  Per-file ``kind="file"`` Evidence records
+    are appended on success.  Any failure (including missing ``project_id``) silently
+    degrades that MR to ``0/0`` with no file evidence; the list-level additions/
+    deletions from ``glab mr list`` are never used — stale stats must not leak.
+    Other MRs are unaffected.
     """
     result: list[Evidence] = []
     for mr, ev in zip(mr_list, mr_evidence):
         add, delete, file_ev = _enrich_mr_with_changes(mr, ev.ref, runner)
-        if file_ev or add or delete:
-            # Replace with enriched Evidence carrying real code-only counts
-            title = mr.get("title", "")
-            enriched = Evidence(
-                kind="pr",
-                ref=ev.ref,
-                url=ev.url,
-                detail=f"{title} (+{add}/-{delete})",
-                additions=add,
-                deletions=delete,
-            )
-            result.append(enriched)
-            result.extend(file_ev)
-        else:
-            result.append(ev)
+        # Always create enriched Evidence from the enrichment result (never fall
+        # back to the original ev, which may carry stale MR-list additions/deletions).
+        title = mr.get("title", "")
+        enriched = Evidence(
+            kind="pr",
+            ref=ev.ref,
+            url=ev.url,
+            detail=f"{title} (+{add}/-{delete})",
+            additions=add,
+            deletions=delete,
+        )
+        result.append(enriched)
+        result.extend(file_ev)
     return result
 
 
