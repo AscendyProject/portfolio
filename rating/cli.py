@@ -25,7 +25,8 @@ from portfolio.narrative import run_claude
 from portfolio.output import emit_markdown
 from portfolio.mask import _rewrite_text
 from portfolio.pipeline import resolve_and_optionally_mask
-from portfolio.share import GistSharer, Sharer, share_links
+from portfolio.card import render_card
+from portfolio.share import GistSharer, Sharer, gist_raw_url, share_links
 from portfolio.sources import SourceRequest, UnsupportedSourceError, known_source_types, resolve_source
 from portfolio.web import fetch_html
 from rating.grade import grade
@@ -77,6 +78,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-mask-on-share", action="store_true", default=False, help="disable auto-masking when --share is set"
     )
+    parser.add_argument("--out-card", metavar="PATH", default=None, help="write the SVG capability card to this file")
     return parser
 
 
@@ -185,6 +187,12 @@ def run(
         f"needs-confirmation: {len(grounding.needs_confirmation)}"
     )
 
+    # Canonical share-channel scrubber — accessible to both --out-card and --share
+    # so both channels mask exactly like the rest of the pipeline (case-insensitive,
+    # longest-first via _rewrite_text).
+    def _scrub_shared(s: str) -> str:
+        return _rewrite_text(s, result.relabel) if (effective_mask and result.relabel) else s
+
     if args.share:
         # Append provenance footer — share path only; non-share render stays byte-identical.
         footer = i18n.LANGS[lang]["share_provenance_footer"]
@@ -195,30 +203,46 @@ def run(
         # renders the subject verbatim into the heading. Scrub the FULL shared Markdown
         # AND the title with the same relabel map so no raw private repo name (from the
         # subject or anywhere else) can reach the gist body or filename.
-        def _scrub_shared(s: str) -> str:
-            # Reuse the canonical masking scrubber (case-insensitive, longest-first)
-            # so the share channels mask exactly like the rest of the pipeline.
-            return _rewrite_text(s, result.relabel) if (effective_mask and result.relabel) else s
-
         shared_markdown = _scrub_shared(shared_markdown)
 
-        # Publish via the injected (or default) Sharer. On failure, the only stderr
-        # output is the single clean error line below (the grounding summary is not
-        # emitted yet), satisfying the single-line failure contract.
-        active_sharer = sharer if sharer is not None else GistSharer()
         # Title → gist filename: scrub with the relabel map, then restrict to
         # filename-safe characters (no path separators / odd bytes reach `gh`).
         title = re.sub(r"[^A-Za-z0-9._-]+", "-", _scrub_shared(f"rating-{result.portfolio.subject}")).strip("-") or (
             "rating"
         )
+
+        # Render the SVG card (subject + card body both scrubbed before publish).
+        card_subject = _scrub_shared(result.portfolio.subject)
+        card_svg = render_card(profile_result, grade_result, subject=card_subject, lang=lang)
+        card_svg = _scrub_shared(card_svg)
+        svg_filename = f"{title}.svg"
+
+        # --out-card may be combined with --share; write the local copy now so the
+        # file is created regardless of whether the subsequent publish succeeds.
+        if args.out_card:
+            try:
+                Path(args.out_card).write_text(card_svg, encoding="utf-8")
+            except OSError as exc:
+                print(f"failed to write --out-card file {args.out_card!r}: {exc}", file=sys.stderr)
+                return 1
+
+        # Publish via the injected (or default) Sharer. On failure, the only stderr
+        # output is the single clean error line below (the grounding summary is not
+        # emitted yet), satisfying the single-line failure contract.
+        active_sharer = sharer if sharer is not None else GistSharer()
         try:
-            share_result = active_sharer.publish(shared_markdown, title=title, public=args.share_public)
+            share_result = active_sharer.publish(
+                shared_markdown,
+                title=title,
+                public=args.share_public,
+                extra_files={svg_filename: card_svg},
+            )
         except Exception:
             print("share failed: could not publish to Gist", file=sys.stderr)
             return 1
 
         # Success: deferred stderr lines (mask summary, grounding summary), then the
-        # footer-bearing report → gist URL → social links on stdout.
+        # footer-bearing report → gist URL → social links → README badge on stdout.
         if mask_summary:
             print(mask_summary, file=sys.stderr)
         print(grounding_summary, file=sys.stderr)
@@ -227,9 +251,22 @@ def run(
         print(share_result.url)
         print(links["linkedin"])
         print(links["x"])
+        raw_url = gist_raw_url(share_result.url, svg_filename)
+        print(f"![Capability rating]({raw_url})")
         return 0
 
     print(grounding_summary, file=sys.stderr)
+
+    # --out-card: render and write the SVG card (independent of --share).
+    if args.out_card:
+        card_subject = _scrub_shared(result.portfolio.subject)
+        card_svg = render_card(profile_result, grade_result, subject=card_subject, lang=lang)
+        card_svg = _scrub_shared(card_svg)
+        try:
+            Path(args.out_card).write_text(card_svg, encoding="utf-8")
+        except OSError as exc:
+            print(f"failed to write --out-card file {args.out_card!r}: {exc}", file=sys.stderr)
+            return 1
 
     if args.out:
         try:
