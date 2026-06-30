@@ -272,10 +272,10 @@ def run(
         print(f"![Capability rating]({raw_url})")
         return 0
 
-    print(grounding_summary, file=sys.stderr)
-
     # --out-card: render and write the card (independent of --share).
     # .png → rasterize via injected rasterizer and write bytes; else write SVG text.
+    # grounding_summary is deferred until AFTER this block so that failure paths
+    # (CardExtraMissingError or OSError) emit exactly ONE clean line on stderr.
     if args.out_card:
         card_subject = _scrub_shared(result.portfolio.subject)
         card_svg = render_card(profile_result, grade_result, subject=card_subject, lang=lang)
@@ -297,6 +297,8 @@ def run(
             except OSError as exc:
                 print(f"failed to write --out-card file {args.out_card!r}: {exc}", file=sys.stderr)
                 return 1
+
+    print(grounding_summary, file=sys.stderr)
 
     if args.out:
         try:

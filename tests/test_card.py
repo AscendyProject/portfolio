@@ -712,19 +712,33 @@ def test_out_card_svg_does_not_call_rasterizer(tmp_path):
 
 
 def test_out_card_svg_byte_identical_to_render_card(tmp_path):
-    """--out-card foo.svg writes bytes identical to render_card(...) for the same inputs."""
+    """--out-card foo.svg writes bytes identical to render_card(...) for the same inputs.
+    Passing rasterizer= causes TypeError pre-change (the parameter didn't exist on run()).
+    The spy on render_card captures its return value; the written file must match it."""
     card_path = tmp_path / "card.svg"
-    code = run(
-        _rating_argv(out_card=str(card_path)),
-        extractor=_fake_extractor,
-        runner=_fake_runner,
-        grader_runner=_fake_grader_runner,
-    )
+    captured_svgs: list[str] = []
+
+    def _spy_render_card(*args, **kwargs):
+        svg = render_card(*args, **kwargs)
+        captured_svgs.append(svg)
+        return svg
+
+    def _unreachable_rasterizer(svg: str) -> bytes:
+        raise AssertionError("rasterizer must not be called for .svg output")  # pragma: no cover
+
+    with patch("rating.cli.render_card", _spy_render_card):
+        code = run(
+            _rating_argv(out_card=str(card_path)),
+            extractor=_fake_extractor,
+            runner=_fake_runner,
+            grader_runner=_fake_grader_runner,
+            rasterizer=_unreachable_rasterizer,
+        )
+
     assert code == 0
+    assert len(captured_svgs) == 1, "render_card must be called exactly once for --out-card .svg"
     written = card_path.read_text(encoding="utf-8")
-    # The file should be valid, self-contained SVG (byte-identical to render_card output).
-    root = ET.fromstring(written)
-    assert root.tag.endswith("svg")
+    assert written == captured_svgs[0], "svg output must be byte-identical to render_card() result"
 
 
 # ---------------------------------------------------------------------------
