@@ -1,0 +1,236 @@
+"""Tests for deterministic tech-synonym matching in fit coverage (issue #37 subset).
+
+Each test traces to a Done-when item in outcome.md via its docstring.
+No live model, gh, or network call; all in-process.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import pytest  # noqa: E402
+
+import resume.select as select_mod  # noqa: E402
+from resume.select import (  # noqa: E402
+    TECH_ALIASES,
+    _stem,
+    jd_keywords,
+)
+from portfolio.model import Claim, Evidence, Portfolio  # noqa: E402
+from fit.score import score_fit  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_portfolio(claim_text: str, ref: str = "PR#1") -> Portfolio:
+    """Minimal grounded portfolio: one evidence, one claim citing it."""
+    ev = Evidence(kind="pr", ref=ref, url=f"https://example.com/{ref}", detail=ref)
+    claim = Claim(text=claim_text, evidence_refs=[ref], confidence=0.9, grounded=True)
+    return Portfolio(subject="tester", evidence=[ev], claims=[claim])
+
+
+# ---------------------------------------------------------------------------
+# Done-when: table shape (dict[str, str], module-level, single-token entries)
+# ---------------------------------------------------------------------------
+
+
+def test_tech_aliases_is_dict_of_str():
+    """TECH_ALIASES must be importable from resume.select and be a dict[str, str]."""
+    assert isinstance(TECH_ALIASES, dict)
+    for k, v in TECH_ALIASES.items():
+        assert isinstance(k, str), f"Key {k!r} is not a str"
+        assert isinstance(v, str), f"Value {v!r} is not a str"
+
+
+def test_tech_aliases_entries_are_single_tokens():
+    """Every key and value in TECH_ALIASES must be a single token: no whitespace, no '/', no '.'."""
+    for k, v in TECH_ALIASES.items():
+        assert " " not in k, f"Key {k!r} contains whitespace"
+        assert "/" not in k, f"Key {k!r} contains '/'"
+        assert "." not in k, f"Key {k!r} contains '.'"
+        assert " " not in v, f"Value {v!r} contains whitespace"
+        assert "/" not in v, f"Value {v!r} contains '/'"
+        assert "." not in v, f"Value {v!r} contains '.'"
+
+
+# ---------------------------------------------------------------------------
+# Done-when: ASCII invariant (keys and values are ASCII, len >= 2)
+# ---------------------------------------------------------------------------
+
+
+def test_tech_aliases_all_ascii_and_min_len():
+    """All alias keys and values must be ASCII and at least 2 characters long."""
+    for k, v in TECH_ALIASES.items():
+        assert k.isascii(), f"Key {k!r} is not pure ASCII"
+        assert v.isascii(), f"Value {v!r} is not pure ASCII"
+        assert len(k) >= 2, f"Key {k!r} is shorter than 2 chars"
+        assert len(v) >= 2, f"Value {v!r} is shorter than 2 chars"
+
+
+# ---------------------------------------------------------------------------
+# Done-when: required pairs present
+# ---------------------------------------------------------------------------
+
+
+REQUIRED_PAIRS = [
+    ("k8s", "kubernetes"),
+    ("js", "javascript"),
+    ("ts", "typescript"),
+    ("py", "python"),
+    ("postgres", "postgresql"),
+    ("pg", "postgresql"),
+    ("golang", "go"),
+    ("ror", "rails"),
+    ("tf", "terraform"),
+]
+
+
+@pytest.mark.parametrize("alias,canonical", REQUIRED_PAIRS)
+def test_tech_aliases_required_pair_present(alias: str, canonical: str):
+    """TECH_ALIASES must contain every required pair from the brief."""
+    assert alias in TECH_ALIASES, f"Required alias {alias!r} not in TECH_ALIASES"
+    assert TECH_ALIASES[alias] == canonical, (
+        f"TECH_ALIASES[{alias!r}] = {TECH_ALIASES[alias]!r}, expected {canonical!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Done-when: high-precision guard (ambiguous keys must be absent)
+# ---------------------------------------------------------------------------
+
+
+FORBIDDEN_KEYS = ["c", "r", "go", "ml", "ai"]
+
+
+@pytest.mark.parametrize("bad_key", FORBIDDEN_KEYS)
+def test_tech_aliases_forbidden_keys_absent(bad_key: str):
+    """Ambiguous / short tokens must NOT appear as keys in TECH_ALIASES."""
+    assert bad_key not in TECH_ALIASES, f"Ambiguous key {bad_key!r} must not be in TECH_ALIASES (precision risk)"
+
+
+# ---------------------------------------------------------------------------
+# Done-when: jd_keywords(alias) == jd_keywords(canonical) for every pair
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("alias,canonical", REQUIRED_PAIRS)
+def test_jd_keywords_alias_equals_canonical(alias: str, canonical: str):
+    """jd_keywords(alias) must equal jd_keywords(canonical) for each required pair."""
+    alias_kw = jd_keywords(alias)
+    canonical_kw = jd_keywords(canonical)
+    assert alias_kw == canonical_kw, (
+        f"jd_keywords({alias!r}) = {alias_kw!r} != jd_keywords({canonical!r}) = {canonical_kw!r}"
+    )
+    assert len(alias_kw) == 1, f"jd_keywords({alias!r}) should produce exactly one token, got {alias_kw!r}"
+
+
+# ---------------------------------------------------------------------------
+# Done-when: passthrough invariant (non-alias tokens unchanged)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("token", ["service", "backend", "python"])
+def test_jd_keywords_passthrough_non_alias(token: str):
+    """A token NOT in TECH_ALIASES must pass through the alias step unchanged."""
+    assert token not in TECH_ALIASES, f"{token!r} is unexpectedly in TECH_ALIASES"
+    expected = {_stem(token)}
+    assert jd_keywords(token) == expected, f"jd_keywords({token!r}) = {jd_keywords(token)!r}, expected {expected!r}"
+
+
+# ---------------------------------------------------------------------------
+# Done-when: coverage in both directions for k8s/kubernetes and postgres/postgresql
+# ---------------------------------------------------------------------------
+
+
+def test_alias_portfolio_covers_canonical_jd_k8s():
+    """score_fit: portfolio using 'k8s' must cover a JD requiring 'kubernetes'."""
+    portfolio = _make_portfolio("shipped on k8s")
+    result = score_fit(portfolio, "requires kubernetes")
+    canonical_stem = _stem("kubernetes")
+    assert canonical_stem in result.covered, (
+        f"'{canonical_stem}' not in covered={result.covered!r}; gaps={result.gaps!r}"
+    )
+    assert canonical_stem not in result.gaps
+
+
+def test_canonical_portfolio_covers_alias_jd_k8s():
+    """score_fit: portfolio using 'kubernetes' must cover a JD that says 'k8s'."""
+    portfolio = _make_portfolio("shipped on kubernetes")
+    result = score_fit(portfolio, "requires k8s")
+    canonical_stem = _stem("kubernetes")
+    assert canonical_stem in result.covered, (
+        f"'{canonical_stem}' not in covered={result.covered!r}; gaps={result.gaps!r}"
+    )
+    assert canonical_stem not in result.gaps
+
+
+def test_alias_portfolio_covers_canonical_jd_postgres():
+    """score_fit: portfolio using 'postgres' must cover a JD requiring 'postgresql'."""
+    portfolio = _make_portfolio("runs on postgres")
+    result = score_fit(portfolio, "requires postgresql")
+    canonical_stem = _stem("postgresql")
+    assert canonical_stem in result.covered, (
+        f"'{canonical_stem}' not in covered={result.covered!r}; gaps={result.gaps!r}"
+    )
+    assert canonical_stem not in result.gaps
+
+
+def test_canonical_portfolio_covers_alias_jd_postgres():
+    """score_fit: portfolio using 'postgresql' must cover a JD that says 'postgres'."""
+    portfolio = _make_portfolio("runs on postgresql")
+    result = score_fit(portfolio, "requires postgres")
+    canonical_stem = _stem("postgresql")
+    assert canonical_stem in result.covered, (
+        f"'{canonical_stem}' not in covered={result.covered!r}; gaps={result.gaps!r}"
+    )
+    assert canonical_stem not in result.gaps
+
+
+# ---------------------------------------------------------------------------
+# Done-when: end-to-end coverage uplift (alias table yields strictly higher coverage)
+# ---------------------------------------------------------------------------
+
+
+def test_coverage_uplift_three_alias_pairs(monkeypatch):
+    """JD with 3 alias pairs against a portfolio using alias forms yields strictly
+    higher coverage_pct than the same call with TECH_ALIASES monkeypatched to {}.
+    """
+    jd_text = "requires kubernetes javascript postgresql"
+    portfolio = _make_portfolio("built js and postgres apps on k8s")
+
+    # Baseline: empty alias table → no synonym matches
+    monkeypatch.setattr(select_mod, "TECH_ALIASES", {})
+    baseline = score_fit(portfolio, jd_text)
+
+    # Restore: real alias table → synonyms match
+    monkeypatch.setattr(select_mod, "TECH_ALIASES", TECH_ALIASES)
+    with_aliases = score_fit(portfolio, jd_text)
+
+    assert with_aliases.coverage_pct > baseline.coverage_pct, (
+        f"Expected alias uplift: {with_aliases.coverage_pct} > {baseline.coverage_pct}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Done-when: determinism (two consecutive score_fit calls return equal results)
+# ---------------------------------------------------------------------------
+
+
+def test_score_fit_deterministic():
+    """score_fit must return identical results across two consecutive calls on the same input."""
+    portfolio = _make_portfolio("built k8s and postgres pipelines using js")
+    jd_text = "requires kubernetes postgresql javascript backend engineer"
+
+    result1 = score_fit(portfolio, jd_text)
+    result2 = score_fit(portfolio, jd_text)
+
+    assert result1.coverage_pct == result2.coverage_pct
+    assert result1.covered == result2.covered
+    assert result1.gaps == result2.gaps
+    assert result1.grade == result2.grade
