@@ -32,14 +32,22 @@ Author-wide (``gitlab-author`` source type)::
 
     glab mr list --author <author> --merged --output json --limit <limit>
 
+Per-MR changes (best-effort, requires authenticated ``glab``)::
+
+    glab api projects/<project_id>/merge_requests/<iid>/changes
+
 ``<project-spec>`` is whatever ``parse_gitlab_source`` returns — bare
 ``namespace/project`` for gitlab.com, ``host/namespace/project`` for
 self-managed GitLab (the form ``glab --repo`` accepts).
 
 All subprocess calls use ``shell=False`` (argv list) and accept an injectable
 ``runner`` so tests can substitute a fake without a real ``glab`` binary.
-Additions/deletions are taken from the JSON payload when present; otherwise
-they default to 0 (graceful degradation, never a crash).
+Additions/deletions are taken from the per-MR changes payload when the
+enrichment succeeds; otherwise they default to 0 (graceful degradation, never
+a crash).  The per-MR enrichment is an N+1 call (one extra ``glab api`` call
+per merged MR) — bounded by the same ``limit`` as the MR list.  Pagination of
+the ``changes`` response is NOT implemented in v1; very large MRs may silently
+truncate the changed-file list.
 """
 
 from __future__ import annotations
@@ -49,6 +57,7 @@ import re
 import subprocess
 from collections.abc import Callable
 
+from .extract import _counts_toward_change_size
 from .model import Evidence
 
 # Redacts GitLab-format tokens (glpat-..., gloas-..., glcbt-..., etc.) from
@@ -81,6 +90,124 @@ def _run_glab(args: list[str]) -> str:
         sanitized = _sanitize_stderr(proc.stderr.strip()[:500])
         raise RuntimeError(f"glab {' '.join(args[:3])} failed (rc={proc.returncode}): {sanitized}")
     return proc.stdout
+
+
+def _count_diff_lines(diff_text: str) -> tuple[int, int]:
+    """Count added/deleted lines in a single file's unified diff text.
+
+    Counts only lines whose first character is ``+`` or ``-`` AND which are
+    NOT file-header lines (``+++``/``---``), hunk headers (``@@``), context
+    lines, or the ``\\ No newline at end of file`` marker.
+
+    Pure function — no I/O.
+    """
+    additions = 0
+    deletions = 0
+    for line in diff_text.splitlines():
+        if not line:
+            continue
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("@@"):
+            continue
+        if line.startswith("\\ "):
+            continue
+        if line[0] == "+":
+            additions += 1
+        elif line[0] == "-":
+            deletions += 1
+    return additions, deletions
+
+
+def parse_mr_changes(
+    changes_json: str,
+    mr_ref: str,
+) -> tuple[int, int, list[Evidence]]:
+    """Parse a ``glab api …/merge_requests/<iid>/changes`` response.
+
+    Accepts both the envelope form ``{"changes": [...]}`` and a bare list.
+    Each entry must have ``new_path``, ``old_path``, ``diff``, and optionally
+    ``new_file``, ``deleted_file``, ``renamed_file`` boolean fields.
+
+    Applies the same code-only filter as the GitHub path
+    (``_counts_toward_change_size`` from ``extract.py``) — lockfiles, vendored
+    directories, and non-code extensions are excluded.
+
+    Returns ``(additions, deletions, file_evidence)`` where:
+    - ``additions`` / ``deletions`` are the code-only sums across all changed files.
+    - ``file_evidence`` is one ``Evidence(kind="file", ref=<bare path>,
+      detail="changed in <mr_ref>")`` per changed CODE file.  The ``ref`` is
+      ``new_path`` for additions/modifications and ``old_path`` for deletions —
+      a bare file path with NO host, owner, or project prefix.
+
+    Pure function — no I/O, no subprocess calls.  Degrades to ``(0, 0, [])``
+    if the payload cannot be parsed.
+    """
+    try:
+        data = json.loads(changes_json)
+    except (json.JSONDecodeError, ValueError):
+        return 0, 0, []
+
+    if isinstance(data, dict):
+        changes = data.get("changes", [])
+    elif isinstance(data, list):
+        changes = data
+    else:
+        return 0, 0, []
+
+    total_add = 0
+    total_del = 0
+    file_evidence: list[Evidence] = []
+
+    for change in changes:
+        if not isinstance(change, dict):
+            continue
+        new_path = change.get("new_path") or ""
+        old_path = change.get("old_path") or ""
+        deleted = change.get("deleted_file", False)
+
+        # Use old_path as the ref for deleted files (new_path is /dev/null)
+        file_path = old_path if deleted else (new_path or old_path)
+
+        if not _counts_toward_change_size(file_path):
+            continue
+
+        diff_text = change.get("diff") or ""
+        add, delete = _count_diff_lines(diff_text)
+        total_add += add
+        total_del += delete
+
+        file_evidence.append(
+            Evidence(
+                kind="file",
+                ref=file_path,
+                detail=f"changed in {mr_ref}",
+            )
+        )
+
+    return total_add, total_del, file_evidence
+
+
+def _enrich_mr_with_changes(
+    mr: dict,
+    mr_ref: str,
+    runner: "Callable[[list[str]], str]",
+) -> tuple[int, int, list[Evidence]]:
+    """Fetch and parse per-MR changes via the injectable runner.
+
+    Best-effort: any exception (auth, transport, parse, missing project_id)
+    silently degrades to ``(0, 0, [])``.  Tokens and raw stderr never appear
+    in the return value or in any log — all exceptions are swallowed.
+    """
+    try:
+        project_id = mr.get("project_id")
+        iid = mr.get("iid")
+        if project_id is None or iid is None:
+            return 0, 0, []
+        out = runner(["api", f"projects/{project_id}/merge_requests/{iid}/changes"])
+        return parse_mr_changes(out, mr_ref)
+    except Exception:  # noqa: BLE001  — best-effort; must not propagate
+        return 0, 0, []
 
 
 def parse_gitlab_mr_evidence(mr_json: str, project: str = "") -> list[Evidence]:
@@ -171,7 +298,43 @@ def extract_merged_mrs(
             "Install it from https://gitlab.com/gitlab-org/cli and authenticate "
             "with: glab auth login"
         )
-    return parse_gitlab_mr_evidence(out, project)
+    mr_evidence = parse_gitlab_mr_evidence(out, project)
+    return _enrich_evidence_list(json.loads(out), mr_evidence, runner)
+
+
+def _enrich_evidence_list(
+    mr_list: list[dict],
+    mr_evidence: list[Evidence],
+    runner: Callable[[list[str]], str],
+) -> list[Evidence]:
+    """Enrich each ``kind="pr"`` Evidence with per-MR changes (best-effort).
+
+    For each MR, fetches ``glab api projects/<id>/merge_requests/<iid>/changes``
+    through the injectable runner.  On success the ``kind="pr"`` Evidence is
+    replaced with one that carries the real code-only additions/deletions and the
+    ``detail`` ends with ``(+A/-D)``.  Per-file ``kind="file"`` Evidence records
+    are appended.  Any failure for one MR silently degrades that MR to ``0/0``
+    with no file evidence; the others are unaffected.
+    """
+    result: list[Evidence] = []
+    for mr, ev in zip(mr_list, mr_evidence):
+        add, delete, file_ev = _enrich_mr_with_changes(mr, ev.ref, runner)
+        if file_ev or add or delete:
+            # Replace with enriched Evidence carrying real code-only counts
+            title = mr.get("title", "")
+            enriched = Evidence(
+                kind="pr",
+                ref=ev.ref,
+                url=ev.url,
+                detail=f"{title} (+{add}/-{delete})",
+                additions=add,
+                deletions=delete,
+            )
+            result.append(enriched)
+            result.extend(file_ev)
+        else:
+            result.append(ev)
+    return result
 
 
 def extract_authored_mrs(
@@ -208,4 +371,5 @@ def extract_authored_mrs(
             "Install it from https://gitlab.com/gitlab-org/cli and authenticate "
             "with: glab auth login"
         )
-    return parse_gitlab_mr_evidence(out)
+    mr_evidence = parse_gitlab_mr_evidence(out)
+    return _enrich_evidence_list(json.loads(out), mr_evidence, runner)

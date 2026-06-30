@@ -7,6 +7,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **GitLab MR change-size + per-file evidence (best-effort)** — each merged MR
+  now triggers one additional `glab api projects/<id>/merge_requests/<iid>/changes`
+  call (N+1, bounded by `--limit`). When `glab` is authenticated the extractor
+  counts code-only added/deleted lines (same denylist as the GitHub path) and
+  emits one `kind="file"` Evidence per changed code file. When the call fails
+  (no auth, 401, transport error), that MR silently falls back to
+  `additions=0 / deletions=0` with no file evidence — no crash, no token/stderr
+  leak. Pagination of the `changes` response and binary-file line stats remain
+  follow-ups.
 - **GitLab support: `--source-type gitlab` and `--source-type gitlab-author`** —
   both source types pull merged Merge Requests as grounded `Evidence` via the
   [`glab` CLI](https://gitlab.com/gitlab-org/cli) (the official GitLab CLI,
