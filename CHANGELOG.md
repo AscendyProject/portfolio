@@ -7,6 +7,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`--share` now updates the same Gist (stable URL / badge)** — `GistSharer.publish`
+  is now find-or-update: it first looks for an existing Gist owned by the authenticated
+  user whose files include `{title}.md` (via `gh api /gists?per_page=100`). When found,
+  the Gists PATCH API updates the Gist in place so the id, URL, and raw-SVG badge URL
+  are unchanged across repeated `--share` runs. When no match is found, a new Gist is
+  created as before. If the look-up call fails (transient network error), the command
+  falls back to creating a new Gist — the share is never lost to a look-up hiccup, but
+  create/edit failures still surface as `ShareError`. **Visibility is fixed at first
+  creation** — a Gist's secret/public visibility cannot be flipped on update; delete the Gist and re-share
+  to change visibility.
 - **`--source-type bitbucket`** — Add Bitbucket Cloud REST API 2.0 evidence extraction (repo-scoped, stdlib `urllib`-based). Supports Bearer (`BITBUCKET_TOKEN`) and Basic (`BITBUCKET_USERNAME` + `BITBUCKET_APP_PASSWORD`) auth; best-effort per-PR diffstat with code-only line counts and per-file evidence; SSRF-guarded pagination; injectable fetcher seam for tests with no live network or credentials.
 - **GitLab MR change-size + per-file evidence (best-effort)** — each merged MR
   now triggers one additional `glab api projects/<id>/merge_requests/<iid>/changes`

@@ -115,8 +115,8 @@ def test_gist_sharer_secret_no_public_flag():
     calls: list = []
     sharer = GistSharer(gh_runner=_make_fake_gh(calls))
     result = sharer.publish("# Hello", title="my-rating", public=False)
-    assert len(calls) == 1
-    argv = calls[0]["argv"]
+    assert len(calls) >= 2  # list call + create call
+    argv = calls[-1]["argv"]
     assert "--public" not in argv
     assert result.url == "https://gist.github.com/fake/abc123"
 
@@ -126,7 +126,7 @@ def test_gist_sharer_public_flag_present():
     calls: list = []
     sharer = GistSharer(gh_runner=_make_fake_gh(calls))
     sharer.publish("# Hello", title="my-rating", public=True)
-    argv = calls[0]["argv"]
+    argv = calls[-1]["argv"]
     assert "--public" in argv
 
 
@@ -145,7 +145,7 @@ def test_gist_sharer_no_live_gh():
     calls: list = []
     sharer = GistSharer(gh_runner=_make_fake_gh(calls))
     result = sharer.publish("# Test", title="t", public=False)
-    assert len(calls) == 1  # exactly one call to fake, not real gh
+    assert len(calls) >= 2  # list call + create call; still no real gh
     assert result.url.startswith("https://gist.github.com/")
 
 
@@ -701,8 +701,8 @@ def test_gist_sharer_extra_files_argv_shape():
         extra_files={"my-rating.svg": "<svg/>"},
     )
     assert result.url == "https://gist.github.com/fake/abc123"
-    assert len(calls) == 1
-    argv = calls[0]["argv"]
+    assert len(calls) >= 2  # list call + create call
+    argv = calls[-1]["argv"]
     # argv is a list (no shell=True)
     assert isinstance(argv, list)
     assert argv[0] == "gh"
@@ -711,7 +711,7 @@ def test_gist_sharer_extra_files_argv_shape():
     # --public must NOT be present (public=False)
     assert "--public" not in argv
     # stdin is None (file-based, not stdin)
-    assert calls[0]["stdin_bytes"] is None
+    assert calls[-1]["stdin_bytes"] is None
     # Exactly one .md path and one .svg path in the argv
     md_paths = [a for a in argv if a.endswith(".md")]
     svg_paths = [a for a in argv if a.endswith(".svg")]
@@ -726,7 +726,7 @@ def test_gist_sharer_extra_files_public_flag():
     calls: list = []
     sharer = GistSharer(gh_runner=_make_fake_gh(calls))
     sharer.publish("md", title="t", public=True, extra_files={"t.svg": "<svg/>"})
-    assert "--public" in calls[0]["argv"]
+    assert "--public" in calls[-1]["argv"]
 
 
 def test_gist_sharer_none_extra_files_uses_stdin():
@@ -734,11 +734,11 @@ def test_gist_sharer_none_extra_files_uses_stdin():
     calls: list = []
     sharer = GistSharer(gh_runner=_make_fake_gh(calls))
     sharer.publish("md content", title="t", public=False, extra_files=None)
-    argv = calls[0]["argv"]
+    argv = calls[-1]["argv"]
     # Single-file stdin path: --filename flag present and "-" arg present
     assert "--filename" in argv
     assert "-" in argv
-    assert calls[0]["stdin_bytes"] == b"md content"
+    assert calls[-1]["stdin_bytes"] == b"md content"
 
 
 def test_publish_failure_no_badge_snippet_on_stdout(capsys):
@@ -1732,3 +1732,319 @@ def test_fit_share_masks_private_repo_in_title_and_body(tmp_path):
     call = fake.calls[0]
     assert _PRIVATE_REPO not in call["title"], f"private repo leaked in fit gist title: {call['title']!r}"
     assert _PRIVATE_REPO not in call["markdown"], "private repo leaked in fit shared body"
+
+
+# ===========================================================================
+# Part H: GistSharer find-or-update (idempotent share)
+# ===========================================================================
+
+
+def _make_fake_gh_with_match(gist_id: str, gist_url: str, title: str, calls: list):
+    """Fake gh runner that returns a matching gist on the list call, then succeeds on edit."""
+
+    def fake_gh(argv: list, stdin_bytes=None) -> str:
+        calls.append({"argv": list(argv), "stdin_bytes": stdin_bytes})
+        if argv[:2] == ["gh", "api"]:
+            return json.dumps(
+                [{"id": gist_id, "html_url": gist_url, "files": {f"{title}.md": {"filename": f"{title}.md"}}}]
+            )
+        # edit call — gh gist edit returns empty stdout
+        return ""
+
+    return fake_gh
+
+
+def _make_fake_gh_no_match(calls: list):
+    """Fake gh runner that returns an empty gist list, then succeeds on create."""
+
+    def fake_gh(argv: list, stdin_bytes=None) -> str:
+        calls.append({"argv": list(argv), "stdin_bytes": stdin_bytes})
+        if argv[:2] == ["gh", "api"]:
+            return "[]"
+        return "https://gist.github.com/fake/abc123\n"
+
+    return fake_gh
+
+
+def test_publish_issues_list_call_first():
+    """GistSharer.publish issues a LIST call (gh api) as its very first call before create/edit."""
+    calls: list = []
+    sharer = GistSharer(gh_runner=_make_fake_gh_no_match(calls))
+    sharer.publish("# Hello", title="my-rating", public=False)
+    assert len(calls) >= 2, "expected at least a list call + create call"
+    first_argv = calls[0]["argv"]
+    assert first_argv[0] == "gh"
+    # First call must not be a create or edit — it must be the list
+    assert "create" not in first_argv
+    assert "edit" not in first_argv
+
+
+def test_publish_list_argv_no_user_flag():
+    """LIST call targets only the authenticated user's own gists — no --user flag."""
+    calls: list = []
+    sharer = GistSharer(gh_runner=_make_fake_gh_no_match(calls))
+    sharer.publish("# Hello", title="my-rating", public=False)
+    # calls[0] must be the LIST call (gh api ...) — not create/edit
+    list_argv = calls[0]["argv"]
+    assert "api" in list_argv, "first call must be the LIST (gh api ...) call, not create/edit"
+    assert "--user" not in list_argv
+    assert "-u" not in list_argv
+    # No foreign user handle in any argv element
+    assert not any(arg.startswith("@") for arg in list_argv)
+
+
+def test_publish_list_argv_is_list_no_shell_true():
+    """LIST call argv is a list (no shell=True) starting with 'gh'."""
+    calls: list = []
+    sharer = GistSharer(gh_runner=_make_fake_gh_no_match(calls))
+    sharer.publish("# Hello", title="my-rating", public=False)
+    # calls[0] must be the LIST call (gh api ...) — old create-only code fails here
+    list_argv = calls[0]["argv"]
+    assert "api" in list_argv, "first call must be the LIST (gh api ...) call — old code fails here"
+    assert isinstance(list_argv, list)
+    assert list_argv[0] == "gh"
+
+
+def test_publish_match_found_issues_patch_call():
+    """When list reports a matching gist, publish PATCHes that gist (stable id/URL) via the
+    Gists API with the markdown content in the JSON body — `gh gist edit` cannot update
+    multiple files, so the atomic PATCH is used for the whole update path."""
+    calls: list = []
+    sharer = GistSharer(
+        gh_runner=_make_fake_gh_with_match("match-id", "https://gist.github.com/user/match-id", "rating-alice", calls)
+    )
+    sharer.publish("# Hello", title="rating-alice", public=False)
+    patch_calls = [c for c in calls if "PATCH" in c["argv"]]
+    assert len(patch_calls) == 1, "expected exactly one gists PATCH call"
+    argv = patch_calls[0]["argv"]
+    assert argv == ["gh", "api", "--method", "PATCH", "/gists/match-id", "--input", "-"], (
+        f"unexpected patch argv: {argv!r}"
+    )
+    body = json.loads(patch_calls[0]["stdin_bytes"])
+    assert body["files"]["rating-alice.md"]["content"] == "# Hello", (
+        f"PATCH body must replace rating-alice.md content, got: {body!r}"
+    )
+
+
+def test_publish_match_found_returns_existing_url():
+    """When match found, ShareResult.url equals the existing gist's URL (stable)."""
+    calls: list = []
+    existing_url = "https://gist.github.com/user/existing-abc"
+    sharer = GistSharer(gh_runner=_make_fake_gh_with_match("existing-abc", existing_url, "rating-alice", calls))
+    result = sharer.publish("# Hello", title="rating-alice", public=False)
+    assert result.url == existing_url
+
+
+def test_publish_match_found_no_create_call():
+    """When match found, publish must NOT issue a gh gist create call."""
+    calls: list = []
+    sharer = GistSharer(
+        gh_runner=_make_fake_gh_with_match("match-id", "https://gist.github.com/u/match-id", "rating-alice", calls)
+    )
+    sharer.publish("# Hello", title="rating-alice", public=False)
+    create_calls = [c for c in calls if "create" in c["argv"]]
+    assert len(create_calls) == 0, "create must not be called when a match is found"
+
+
+def test_publish_match_with_extra_files_patch_updates_md_and_svg():
+    """When match found and extra_files has .svg, the PATCH body replaces BOTH the .md and
+    the .svg contents in one atomic call (so a re-run refreshes the badge SVG at the same URL)."""
+    calls: list = []
+    sharer = GistSharer(
+        gh_runner=_make_fake_gh_with_match("match-id", "https://gist.github.com/user/match-id", "rating-alice", calls)
+    )
+    sharer.publish(
+        "# Hello",
+        title="rating-alice",
+        public=False,
+        extra_files={"rating-alice.svg": "<svg/>"},
+    )
+    patch_calls = [c for c in calls if "PATCH" in c["argv"]]
+    assert len(patch_calls) == 1
+    files = json.loads(patch_calls[0]["stdin_bytes"])["files"]
+    assert files["rating-alice.md"]["content"] == "# Hello", "PATCH must replace the .md content"
+    assert files["rating-alice.svg"]["content"] == "<svg/>", "PATCH must replace the .svg content"
+
+
+def test_publish_match_with_extra_files_patch_argv_is_list():
+    """Update call argv is a list (no shell=True) — file contents ride in the JSON body, not argv."""
+    calls: list = []
+    sharer = GistSharer(
+        gh_runner=_make_fake_gh_with_match("match-id", "https://gist.github.com/user/match-id", "rating-alice", calls)
+    )
+    sharer.publish("# Hello", title="rating-alice", public=False, extra_files={"rating-alice.svg": "<svg/>"})
+    patch_calls = [c for c in calls if "PATCH" in c["argv"]]
+    assert isinstance(patch_calls[0]["argv"], list)
+
+
+def test_publish_no_match_issues_create_list_precedes_create():
+    """When no match found, LIST call precedes the CREATE call in the recorded argv sequence."""
+    calls: list = []
+    sharer = GistSharer(gh_runner=_make_fake_gh_no_match(calls))
+    sharer.publish("# Hello", title="no-match-rating", public=False)
+    argvs = [c["argv"] for c in calls]
+    list_indices = [i for i, a in enumerate(argvs) if "api" in a]
+    create_indices = [i for i, a in enumerate(argvs) if "create" in a]
+    assert list_indices, "LIST call was not issued"
+    assert create_indices, "CREATE call was not issued"
+    assert list_indices[0] < create_indices[0], "LIST call must precede CREATE call"
+
+
+def test_publish_no_match_create_argv_shape_no_extra_files():
+    """On no-match path with extra_files=None, a LIST call precedes create; create uses --filename and stdin."""
+    calls: list = []
+    sharer = GistSharer(gh_runner=_make_fake_gh_no_match(calls))
+    sharer.publish("md content", title="no-match-rating", public=False)
+    argvs = [c["argv"] for c in calls]
+    # LIST call must precede CREATE — old list-less code fails this assertion
+    list_indices = [i for i, a in enumerate(argvs) if "api" in a]
+    create_indices = [i for i, a in enumerate(argvs) if "create" in a]
+    assert list_indices, "LIST call was not issued — old code fails here"
+    assert create_indices, "CREATE call was not issued"
+    assert list_indices[0] < create_indices[0], "LIST must precede CREATE"
+    create_calls = [c for c in calls if "create" in c["argv"]]
+    assert len(create_calls) == 1
+    argv = create_calls[0]["argv"]
+    assert "--filename" in argv
+    assert "-" in argv
+    assert create_calls[0]["stdin_bytes"] == b"md content"
+
+
+def test_publish_no_match_public_flag():
+    """On no-match path with public=True, a LIST call precedes create; --public is in the create argv."""
+    calls: list = []
+    sharer = GistSharer(gh_runner=_make_fake_gh_no_match(calls))
+    sharer.publish("# Hello", title="rating", public=True)
+    argvs = [c["argv"] for c in calls]
+    # LIST call must precede CREATE — old list-less code fails this assertion
+    list_indices = [i for i, a in enumerate(argvs) if "api" in a]
+    create_indices = [i for i, a in enumerate(argvs) if "create" in a]
+    assert list_indices, "LIST call was not issued — old code fails here"
+    assert list_indices[0] < create_indices[0], "LIST must precede CREATE"
+    create_calls = [c for c in calls if "create" in c["argv"]]
+    assert len(create_calls) == 1
+    assert "--public" in create_calls[0]["argv"]
+
+
+def test_publish_url_stability_two_calls_same_url():
+    """Two consecutive publishes against the same matching fake state return the same URL."""
+    existing_url = "https://gist.github.com/user/stable-id"
+
+    def _make_stateful_fake():
+        def fake_gh(argv: list, stdin_bytes=None) -> str:
+            if argv[:2] == ["gh", "api"]:
+                return json.dumps([{"id": "stable-id", "html_url": existing_url, "files": {"rating-stable.md": {}}}])
+            return ""  # edit call succeeds silently
+
+        return fake_gh
+
+    result1 = GistSharer(gh_runner=_make_stateful_fake()).publish("# v1", title="rating-stable", public=False)
+    result2 = GistSharer(gh_runner=_make_stateful_fake()).publish("# v2", title="rating-stable", public=False)
+    assert result1.url == result2.url == existing_url, "URL must be stable across repeated publishes"
+
+
+def test_publish_list_failure_falls_back_to_create():
+    """When LIST call raises, publish falls back to CREATE and returns a ShareResult."""
+    calls: list = []
+
+    def failing_list_gh(argv: list, stdin_bytes=None) -> str:
+        calls.append({"argv": list(argv), "stdin_bytes": stdin_bytes})
+        if argv[:2] == ["gh", "api"]:
+            raise RuntimeError("gh api unavailable")
+        return "https://gist.github.com/fake/fallback123\n"
+
+    result = GistSharer(gh_runner=failing_list_gh).publish("# Hello", title="t", public=False)
+    # LIST argv was attempted first
+    list_calls = [c for c in calls if "api" in c["argv"]]
+    assert len(list_calls) >= 1, "LIST argv must have been attempted even when it raises"
+    # CREATE call was issued after
+    create_calls = [c for c in calls if "create" in c["argv"]]
+    assert len(create_calls) >= 1, "CREATE call must be issued after list failure"
+    # publish returns normally (no exception propagates)
+    assert isinstance(result, ShareResult)
+    assert result.url.startswith("https://gist.github.com/")
+
+
+def test_publish_list_failure_list_call_precedes_create():
+    """LIST argv must be the FIRST call even when it raises — verifies today's create-only code fails."""
+    calls: list = []
+
+    def failing_list_gh(argv: list, stdin_bytes=None) -> str:
+        calls.append({"argv": list(argv), "stdin_bytes": stdin_bytes})
+        if argv[:2] == ["gh", "api"]:
+            raise RuntimeError("list failed")
+        return "https://gist.github.com/fake/fallback\n"
+
+    GistSharer(gh_runner=failing_list_gh).publish("# Hello", title="t", public=False)
+    argvs = [c["argv"] for c in calls]
+    list_indices = [i for i, a in enumerate(argvs) if "api" in a]
+    create_indices = [i for i, a in enumerate(argvs) if "create" in a]
+    assert list_indices, "LIST argv was not attempted — today's create-only code fails here"
+    assert create_indices, "CREATE argv must follow"
+    assert list_indices[0] < create_indices[0]
+
+
+def test_publish_edit_failure_propagates():
+    """When the update (PATCH) call raises, publish raises — update failures are NOT swallowed."""
+    calls: list = []
+
+    def edit_fail_gh(argv: list, stdin_bytes=None) -> str:
+        calls.append({"argv": list(argv), "stdin_bytes": stdin_bytes})
+        # Check PATCH first: the update call also starts with `gh api`, so distinguish it
+        # from the plain list call before the generic list-return branch.
+        if "PATCH" in argv:
+            raise RuntimeError("gists PATCH failed")
+        if argv[:2] == ["gh", "api"]:
+            return json.dumps(
+                [
+                    {
+                        "id": "edit-fail-id",
+                        "html_url": "https://gist.github.com/u/edit-fail-id",
+                        "files": {"rating-editfail.md": {}},
+                    }
+                ]
+            )
+        return ""
+
+    sharer = GistSharer(gh_runner=edit_fail_gh)
+    with pytest.raises(RuntimeError):
+        sharer.publish("# Hello", title="rating-editfail", public=False)
+    # The update (PATCH) argv was actually attempted before the raise — today's
+    # create-only code never issues a PATCH, so this fails pre-change.
+    patch_calls = [c for c in calls if "PATCH" in c["argv"]]
+    assert len(patch_calls) >= 1, "PATCH update argv must have been attempted"
+
+
+def test_publish_create_failure_propagates():
+    """When LIST succeeds (no match) but CREATE raises, publish raises — not swallowed."""
+    calls: list = []
+
+    def create_fail_gh(argv: list, stdin_bytes=None) -> str:
+        calls.append({"argv": list(argv), "stdin_bytes": stdin_bytes})
+        if argv[:2] == ["gh", "api"]:
+            return "[]"
+        raise RuntimeError("gh gist create failed")
+
+    sharer = GistSharer(gh_runner=create_fail_gh)
+    with pytest.raises(RuntimeError):
+        sharer.publish("# Hello", title="t", public=False)
+    # LIST was issued before CREATE
+    list_calls = [c for c in calls if "api" in c["argv"]]
+    assert len(list_calls) >= 1, "LIST argv must have been attempted — today's list-less code fails here"
+
+
+def test_publish_determinism_same_inputs_same_decision():
+    """Given the same fake list output and same title, two GistSharer instances make the same decision."""
+    existing_url = "https://gist.github.com/user/det-id"
+
+    def _make_det_fake():
+        def fake_gh(argv: list, stdin_bytes=None) -> str:
+            if argv[:2] == ["gh", "api"]:
+                return json.dumps([{"id": "det-id", "html_url": existing_url, "files": {"rating-det.md": {}}}])
+            return ""
+
+        return fake_gh
+
+    result1 = GistSharer(gh_runner=_make_det_fake()).publish("# A", title="rating-det", public=False)
+    result2 = GistSharer(gh_runner=_make_det_fake()).publish("# B", title="rating-det", public=False)
+    assert result1.url == result2.url == existing_url, "create-vs-edit decision must be deterministic"
