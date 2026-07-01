@@ -610,7 +610,7 @@ def test_gist_sharer_extra_files_argv_has_both_paths():
         public=False,
         extra_files={"my-rating.svg": "<svg/>"},
     )
-    argv = calls[0]["argv"]
+    argv = calls[-1]["argv"]
     assert isinstance(argv, list)
     assert argv[0] == "gh"
     md_paths = [a for a in argv if a.endswith(".md")]
@@ -629,7 +629,7 @@ def test_gist_sharer_extra_files_single_tmpdir():
         public=False,
         extra_files={"my-rating.svg": "<svg/>"},
     )
-    argv = calls[0]["argv"]
+    argv = calls[-1]["argv"]
     md_paths = [a for a in argv if a.endswith(".md")]
     svg_paths = [a for a in argv if a.endswith(".svg")]
     assert os.path.dirname(md_paths[0]) == os.path.dirname(svg_paths[0])
@@ -640,7 +640,7 @@ def test_gist_sharer_extra_files_no_stdin():
     calls: list = []
     sharer = GistSharer(gh_runner=_make_fake_gh(calls))
     sharer.publish("md", title="t", public=False, extra_files={"t.svg": "<svg/>"})
-    assert calls[0]["stdin_bytes"] is None
+    assert calls[-1]["stdin_bytes"] is None
 
 
 def test_gist_sharer_extra_files_no_shell_true():
@@ -649,7 +649,7 @@ def test_gist_sharer_extra_files_no_shell_true():
     sharer = GistSharer(gh_runner=_make_fake_gh(calls))
     sharer.publish("md", title="t", public=False, extra_files={"t.svg": "<svg/>"})
     # If shell=True were used, argv would be a string; assert it is a list.
-    assert isinstance(calls[0]["argv"], list)
+    assert isinstance(calls[-1]["argv"], list)
 
 
 # ---------------------------------------------------------------------------

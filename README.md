@@ -261,17 +261,32 @@ python -m rating --source-type github-author --author <handle> --share --no-mask
 python -m rating --source-type github-author --author <handle> --share --share-public
 ```
 
-The Gist is created via `gh gist create` (requires an authenticated `gh` session). On
-success, stdout shows the rendered report followed by the Gist URL, a LinkedIn share
-link, an X share link, and a **README badge snippet** you can paste directly into a
-profile README:
+The Gist is published via `gh gist create` the first time, then updated in place via the
+Gists PATCH API (`gh api --method PATCH /gists/<id>`) on re-runs (requires an authenticated
+`gh` session). On success, stdout shows the rendered report followed by the Gist URL, a
+LinkedIn share link, an X share link, and a **README badge snippet** you can paste
+directly into a profile README:
 
 ```markdown
 ![Capability rating](https://gist.githubusercontent.com/<user>/<id>/raw/rating-<handle>.svg)
 ```
 
-On failure, the CLI exits non-zero with a clean error on stderr; no partial Gist URL,
-social links, or badge snippet are printed.
+**Stable URL / badge** — re-running `--share` for the same subject finds and updates the
+existing Gist in place (same id → same URL → same raw-SVG badge URL). Your README badge
+always reflects the latest rating without needing a URL update. If no existing Gist is
+found, a new one is created as before.
+
+**Visibility is fixed at first creation** — `--share-public` controls whether the Gist
+is public or secret when first created. On subsequent `--share` runs, visibility is not
+changed; a Gist's secret/public visibility cannot be flipped on update. If you
+need to change visibility, delete the Gist and re-run `--share`.
+
+**Lookup fallback** — if listing your existing Gists fails (e.g. transient network
+error), `--share` falls back to creating a new Gist so your rating is never lost to a
+lookup hiccup.
+
+On failure (create or edit), the CLI exits non-zero with a clean error on stderr; no
+partial Gist URL, social links, or badge snippet are printed.
 
 #### `--out-card` — write an SVG capability card locally
 
